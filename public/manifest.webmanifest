@@ -1,0 +1,9 @@
+{
+  "name": "Truck Sim Test",
+  "short_name": "TruckSim",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#12161c",
+  "theme_color": "#12161c",
+  "start_url": "."
+}

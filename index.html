@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#12161c" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>Truck Sim Test</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <canvas id="game-canvas"></canvas>
+
+    <!-- ============ MAIN MENU ============ -->
+    <section id="screen-menu" class="screen overlay">
+      <div class="menu-card">
+        <div class="logo">
+          <div class="logo-mark"><span class="logo-cab"></span><span class="logo-box"></span></div>
+          <h1>HAUL<span>RUN</span></h1>
+          <p class="tagline">Truck Simulator &middot; Test Build</p>
+        </div>
+        <div class="menu-stats">
+          <div><small>Balance</small><strong id="menu-money">$0</strong></div>
+          <div><small>Deliveries</small><strong id="menu-deliveries">0</strong></div>
+        </div>
+        <div class="menu-buttons">
+          <button class="btn btn-primary" id="btn-play">Play</button>
+          <button class="btn" id="btn-settings">Settings</button>
+          <button class="btn btn-ghost" id="btn-fullscreen">Fullscreen</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SETTINGS ============ -->
+    <section id="screen-settings" class="screen overlay hidden">
+      <div class="panel">
+        <h2>Settings</h2>
+        <label class="row"><span>Audio</span><input type="checkbox" id="set-audio" class="toggle" /></label>
+        <label class="row"><span>Sound effects</span><input type="checkbox" id="set-sfx" class="toggle" /></label>
+        <div class="row">
+          <span>Graphics</span>
+          <div class="segmented" id="set-quality">
+            <button data-q="low">Low</button><button data-q="medium">Med</button><button data-q="high">High</button>
+          </div>
+        </div>
+        <label class="row"><span>Show FPS</span><input type="checkbox" id="set-fps" class="toggle" /></label>
+        <div class="row">
+          <span>Progress</span>
+          <button class="btn btn-small btn-danger" id="btn-reset-progress">Reset save</button>
+        </div>
+        <button class="btn btn-primary" id="btn-settings-back">Back</button>
+      </div>
+    </section>
+
+    <!-- ============ JOB OFFER ============ -->
+    <section id="screen-offer" class="screen overlay hidden">
+      <div class="panel">
+        <h2>Delivery Job</h2>
+        <dl class="job">
+          <dt>From</dt><dd id="offer-from"></dd>
+          <dt>To</dt><dd id="offer-to"></dd>
+          <dt>Cargo</dt><dd id="offer-cargo"></dd>
+          <dt>Distance</dt><dd id="offer-distance"></dd>
+          <dt>Pay</dt><dd id="offer-pay" class="money"></dd>
+        </dl>
+        <p class="hint">Drive to the green marker and stop inside it to unload. Collisions reduce your pay.</p>
+        <div class="btn-row">
+          <button class="btn" id="btn-offer-back">Menu</button>
+          <button class="btn btn-primary" id="btn-offer-accept">Accept &amp; Drive</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HUD ============ -->
+    <section id="hud" class="hidden">
+      <div class="hud-objective">
+        <div class="nav-arrow" id="hud-arrow">&#x25B2;</div>
+        <div>
+          <div class="objective-text" id="hud-objective">Deliver cargo</div>
+          <div class="objective-dist" id="hud-distance">0 m</div>
+        </div>
+      </div>
+      <div class="hud-topright">
+        <div class="hud-money" id="hud-money">$0</div>
+        <button class="icon-btn" id="btn-pause" data-action="pause" aria-label="Pause">&#10074;&#10074;</button>
+      </div>
+      <canvas id="minimap" width="150" height="150"></canvas>
+      <div class="hud-speedo">
+        <div class="gear" id="hud-gear">D</div>
+        <div class="speed"><span id="hud-speed">0</span><small>km/h</small></div>
+        <div class="condition"><div class="bar"><div id="hud-condition-bar"></div></div><small id="hud-condition">Condition 100%</small></div>
+      </div>
+      <div class="unload hidden" id="hud-unload"><div>Unloading&hellip;</div><div class="bar"><div id="hud-unload-bar"></div></div></div>
+      <div id="fps" class="hidden">-- fps</div>
+    </section>
+
+    <!-- ============ TOUCH CONTROLS ============ -->
+    <section id="controls" class="hidden">
+      <div class="steer-pad">
+        <button class="ctrl ctrl-steer" data-hold="left" aria-label="Steer left">&#9664;</button>
+        <button class="ctrl ctrl-steer" data-hold="right" aria-label="Steer right">&#9654;</button>
+      </div>
+      <div class="side-buttons">
+        <button class="ctrl ctrl-small" data-action="camera" aria-label="Camera">CAM</button>
+        <button class="ctrl ctrl-small" data-action="reset" aria-label="Recover truck">RESET</button>
+      </div>
+      <div class="pedal-pad">
+        <button class="ctrl ctrl-gear" id="ctrl-gear" data-action="gear" aria-label="Toggle Drive/Reverse">
+          <span class="g-d">D</span><span class="g-r">R</span>
+        </button>
+        <button class="ctrl ctrl-brake" data-hold="brake" aria-label="Brake">BRAKE</button>
+        <button class="ctrl ctrl-gas" data-hold="throttle" aria-label="Accelerate">GAS</button>
+      </div>
+    </section>
+
+    <!-- ============ PAUSE ============ -->
+    <section id="screen-pause" class="screen overlay hidden">
+      <div class="panel">
+        <h2>Paused</h2>
+        <button class="btn btn-primary" id="btn-resume">Resume</button>
+        <button class="btn" id="btn-restart">Restart delivery</button>
+        <button class="btn" id="btn-pause-settings">Settings</button>
+        <button class="btn btn-ghost" id="btn-pause-menu">Main menu</button>
+      </div>
+    </section>
+
+    <!-- ============ COMPLETE ============ -->
+    <section id="screen-complete" class="screen overlay hidden">
+      <div class="panel">
+        <h2 class="success">Delivery Complete!</h2>
+        <dl class="job">
+          <dt>Delivery pay</dt><dd id="res-base"></dd>
+          <dt>Time bonus</dt><dd id="res-bonus"></dd>
+          <dt>Damage</dt><dd id="res-damage"></dd>
+          <dt>Time</dt><dd id="res-time"></dd>
+          <dt class="total">Earned</dt><dd id="res-total" class="money total"></dd>
+          <dt>Balance</dt><dd id="res-balance"></dd>
+        </dl>
+        <div class="btn-row">
+          <button class="btn" id="btn-complete-menu">Menu</button>
+          <button class="btn btn-primary" id="btn-next">Next delivery</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FAILED ============ -->
+    <section id="screen-failed" class="screen overlay hidden">
+      <div class="panel">
+        <h2 class="fail">Delivery Failed</h2>
+        <p id="fail-reason"></p>
+        <div class="btn-row">
+          <button class="btn" id="btn-failed-menu">Menu</button>
+          <button class="btn btn-primary" id="btn-retry">Retry</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="toast" class="hidden"></div>
+    <div id="rotate-hint" class="hidden">
+      <div>Rotate your device to landscape for the best experience.</div>
+      <button class="btn btn-small" id="btn-rotate-dismiss">Continue anyway</button>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
