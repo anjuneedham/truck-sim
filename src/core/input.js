@@ -22,6 +22,7 @@ const ACTION_KEYS = {
   KeyR: 'gear',
   KeyC: 'camera',
   KeyT: 'reset',
+  KeyH: 'hitch',
   Escape: 'pause',
   KeyP: 'pause',
   Enter: 'confirm',

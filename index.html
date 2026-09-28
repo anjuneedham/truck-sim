@@ -109,6 +109,7 @@
           <dt>From</dt><dd id="offer-from"></dd>
           <dt>To</dt><dd id="offer-to"></dd>
           <dt>Cargo</dt><dd id="offer-cargo"></dd>
+          <dt>Trailer</dt><dd id="offer-trailer"></dd>
           <dt>Distance</dt><dd id="offer-distance"></dd>
           <dt>Pay</dt><dd id="offer-pay" class="money"></dd>
         </dl>
@@ -143,6 +144,7 @@
         <div class="condition"><div class="bar"><div id="hud-condition-bar"></div></div><small id="hud-condition">Condition 100%</small></div>
       </div>
       <div class="unload hidden" id="hud-unload"><div>Unloading&hellip;</div><div class="bar"><div id="hud-unload-bar"></div></div></div>
+      <div id="hud-hint" class="hud-hint hidden"></div>
       <div id="fps" class="hidden">-- fps</div>
     </section>
 
@@ -168,6 +170,7 @@
       <div class="side-buttons">
         <button class="ctrl ctrl-small" data-action="camera" aria-label="Camera">CAM</button>
         <button class="ctrl ctrl-small" data-action="reset" aria-label="Recover truck">RESET</button>
+        <button class="ctrl ctrl-small ctrl-hitch hidden" id="ctrl-hitch" data-action="hitch" aria-label="Couple or uncouple trailer">HITCH</button>
       </div>
       <div class="pedal-pad">
         <button class="ctrl ctrl-gear" id="ctrl-gear" data-action="gear" aria-label="Toggle Drive/Reverse">

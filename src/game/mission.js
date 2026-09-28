@@ -3,6 +3,10 @@
 // States:  offer -> active -> complete
 //                        \-> failed (only if the truck's condition hits 0%)
 //
+// With a tractor unit the cargo is in a trailer: the objective is first to
+// couple the parked trailer, then to park the *trailer* inside the zone.
+// Rigid trucks carry the cargo themselves.
+//
 // Also owns the destination marker visuals (zone pad + beacon).
 
 import * as THREE from 'three';
@@ -10,8 +14,10 @@ import { MISSION } from '../config.js';
 import { SPAWN } from './mapData.js';
 
 export class Mission {
-  constructor(scene, job) {
+  /** @param {import('./trailerPhysics.js').TrailerPhysics|null} trailer */
+  constructor(scene, job, trailer = null) {
     this.job = job;
+    this.trailer = trailer;
     this.state = 'offer';
     this.elapsed = 0;
     this.stoppedTime = 0;
@@ -20,9 +26,11 @@ export class Mission {
     // Route estimate: straight line * 1.35 approximates following the road grid.
     const straight = Math.hypot(job.zone.x - SPAWN.x, job.zone.z - SPAWN.z);
     this.routeKm = (straight * 1.35) / 1000;
-    this.basePay = Math.round((MISSION.basePay + this.routeKm * MISSION.payPerKm) / 10) * 10;
-    // Par time: average 35 km/h on the route.
-    this.parTime = (this.routeKm / 35) * 3600;
+    const trailerBonus = trailer ? MISSION.trailerPayMultiplier : 1;
+    this.basePay = Math.round(((MISSION.basePay + this.routeKm * MISSION.payPerKm) * trailerBonus) / 10) * 10;
+    // Par time from an average route speed (loaded rigs are slower).
+    const parSpeed = trailer ? MISSION.parSpeedTrailerKmh : MISSION.parSpeedKmh;
+    this.parTime = (this.routeKm / parSpeed) * 3600;
 
     this.marker = this.buildMarker(scene, job.zone);
   }
@@ -84,24 +92,44 @@ export class Mission {
     this.stoppedTime = 0;
   }
 
-  distanceTo(phys) {
-    return Math.hypot(this.job.zone.x - phys.x, this.job.zone.z - phys.z);
+  /** Current step: 'couple' (go get the trailer) or 'deliver'. */
+  get stage() {
+    return this.trailer && !this.trailer.attached && !this.cargoInZone(null) ? 'couple' : 'deliver';
   }
 
-  /** Bearing to the destination relative to the truck heading (rad, + = to the right). */
+  /** Where the HUD arrow / distance should point right now. */
+  target() {
+    if (this.stage === 'couple') return { x: this.trailer.kx, z: this.trailer.kz };
+    return { x: this.job.zone.x, z: this.job.zone.z };
+  }
+
+  distanceTo(phys) {
+    const t = this.target();
+    return Math.hypot(t.x - phys.x, t.z - phys.z);
+  }
+
+  /** Bearing to the current target relative to the truck heading (rad, + = to the right). */
   relativeBearing(phys) {
-    const dx = this.job.zone.x - phys.x;
-    const dz = this.job.zone.z - phys.z;
-    const target = Math.atan2(dx, dz);
-    const d = phys.heading - target;
+    const t = this.target();
+    const d = phys.heading - Math.atan2(t.x - phys.x, t.z - phys.z);
     return Math.atan2(Math.sin(d), Math.cos(d));
   }
 
-  /** Truck counts as "in" when its centre is on (or within 2.5 m of) the pad. */
-  inZone(phys) {
-    const z = this.job.zone;
+  pointInZone(x, z) {
+    const zone = this.job.zone;
     const tol = 2.5;
-    return Math.abs(phys.x - z.x) < z.w / 2 + tol && Math.abs(phys.z - z.z) < z.l / 2 + tol;
+    return Math.abs(x - zone.x) < zone.w / 2 + tol && Math.abs(z - zone.z) < zone.l / 2 + tol;
+  }
+
+  /** Is the cargo (trailer body, or the rigid truck itself) on the pad? */
+  cargoInZone(phys) {
+    if (this.trailer) return this.pointInZone(this.trailer.cx, this.trailer.cz);
+    return phys ? this.pointInZone(phys.x, phys.z) : false;
+  }
+
+  /** Kept for the HUD: true when the cargo is on the pad. */
+  inZone(phys) {
+    return this.cargoInZone(phys);
   }
 
   /** Returns 'complete' | 'failed' | null when the state changes this frame. */
@@ -119,7 +147,7 @@ export class Mission {
       return 'failed';
     }
 
-    if (this.inZone(phys) && Math.abs(phys.speed) < MISSION.stopSpeed) {
+    if (this.cargoInZone(phys) && Math.abs(phys.speed) < MISSION.stopSpeed) {
       this.stoppedTime += dt;
       if (this.stoppedTime >= MISSION.stopTime) {
         this.state = 'complete';

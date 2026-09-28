@@ -16,6 +16,7 @@ export class CameraRig {
     this.yaw = 0; // smoothed follow yaw
     this.lookOffset = 0; // user look-around yaw offset
     this.zoom = 1; // pinch zoom multiplier on follow distance
+    this.extraDistance = 0; // added follow distance (e.g. when towing a trailer)
     this.distance = CAMERA.presets[0].distance;
     this.height = CAMERA.presets[0].height;
     this.turnOffset = 0;
@@ -60,7 +61,7 @@ export class CameraRig {
 
     if (!this.initialised) {
       this.yaw = phys.heading;
-      this.distance = (preset.distance || 0) * this.zoom;
+      this.distance = ((preset.distance || 0) + this.extraDistance) * this.zoom;
       this.height = preset.height;
       this.turnOffset = 0;
     }
@@ -104,9 +105,10 @@ export class CameraRig {
 
     const yaw = this.yaw + this.lookOffset;
     // Ease distance/height to the preset (slightly further back at speed).
-    const wantDist = (preset.distance + Math.min(4, speed * 0.12)) * this.zoom;
+    const wantDist = (preset.distance + this.extraDistance + Math.min(4, speed * 0.12)) * this.zoom;
     this.distance += (wantDist - this.distance) * k(3);
-    this.height += (preset.height * (0.8 + 0.2 * this.zoom) - this.height) * k(CAMERA.heightLag);
+    const wantHeight = (preset.height + this.extraDistance * 0.25) * (0.8 + 0.2 * this.zoom);
+    this.height += (wantHeight - this.height) * k(CAMERA.heightLag);
 
     // Anti-clip: shorten the boom if something tall is between truck and camera.
     let bx = tx - Math.sin(yaw) * this.distance;

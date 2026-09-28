@@ -8,7 +8,7 @@
 // input, audio, save); this file wires them together and runs the loop.
 
 import * as THREE from 'three';
-import { QUALITY, WORLD } from './config.js';
+import { QUALITY, WORLD, MISSION } from './config.js';
 import { SaveSystem } from './core/save.js';
 import { Input } from './core/input.js';
 import { AudioSystem } from './core/audio.js';
@@ -17,6 +17,9 @@ import { TruckPhysics } from './game/truckPhysics.js';
 import { TruckModel } from './game/truckModel.js';
 import { CameraRig } from './game/cameraRig.js';
 import { Mission } from './game/mission.js';
+import { TrailerPhysics, JACKKNIFE_WARN, wrapAngle } from './game/trailerPhysics.js';
+import { TrailerModel } from './game/trailerModel.js';
+import { getTrailerType } from './data/trailers.js';
 import { JOBS, SPAWN, LOTS, distanceToRoad, insideRect } from './game/mapData.js';
 import { UI } from './ui/ui.js';
 import { TRUCK_CATALOGUE, getTruck, buildSpec, truckStats, plateFor } from './data/trucks.js';
@@ -231,13 +234,87 @@ class Game {
   // ---------------------------------------------------------------- state changes
   resetTruck(x, z, heading) {
     this.phys.reset(x, z, heading);
+    const t = this.phys.trailer;
+    if (t) {
+      t.place(this.phys.hitchX, this.phys.hitchZ, heading);
+      this.phys.attachTrailer(t);
+    }
     this.model.update(this.phys, { brake: 0 }, 0);
+    this.trailerModel?.update(this.trailer, 0, false, 0);
     this.cameraRig.snap(this.phys);
+  }
+
+  // ---------------------------------------------------------------- trailers
+  /** Create the job's trailer parked behind the spawn point (tractor units only). */
+  spawnTrailer(job) {
+    this.removeTrailer();
+    if (this.truckEntry.body !== 'tractor') return null;
+    const type = getTrailerType(job.trailer);
+    const t = new TrailerPhysics(type, job.cargoMass || 0);
+    // Kingpin a few metres behind the fifth wheel so the player reverses under it.
+    const h = SPAWN.heading;
+    const hx = this.phys.hitchX - Math.sin(h) * MISSION.trailerSpawnGap;
+    const hz = this.phys.hitchZ - Math.cos(h) * MISSION.trailerSpawnGap;
+    t.place(hx, hz, h);
+    this.world.collision.addDynamic(t.parkedBox);
+    this.trailer = t;
+    this.trailerModel = new TrailerModel(type);
+    this.trailerModel.setShadowMode(this.renderer.shadowMap.enabled);
+    this.trailerModel.update(t, 0, false, 0);
+    this.scene.add(this.trailerModel.root);
+    return t;
+  }
+
+  removeTrailer() {
+    if (this.phys.trailer) this.phys.detachTrailer();
+    if (this.trailer) this.world.collision.removeDynamic(this.trailer.parkedBox);
+    if (this.trailerModel) {
+      this.scene.remove(this.trailerModel.root);
+      this.trailerModel.dispose();
+    }
+    this.trailer = null;
+    this.trailerModel = null;
+  }
+
+  /** Fifth wheel lined up under the kingpin, slow enough to couple? */
+  canCouple() {
+    const t = this.trailer;
+    const p = this.phys;
+    if (!t || t.attached) return false;
+    return (
+      Math.abs(p.speed) < MISSION.coupleSpeed &&
+      Math.hypot(p.hitchX - t.kx, p.hitchZ - t.kz) < MISSION.coupleDistance &&
+      Math.abs(wrapAngle(p.heading - t.heading)) < MISSION.coupleAngle
+    );
+  }
+
+  toggleHitch() {
+    const t = this.trailer;
+    if (!t) return;
+    if (t.attached) {
+      if (Math.abs(this.phys.speed) > MISSION.coupleSpeed) {
+        this.ui.toast('Stop to uncouple the trailer');
+        return;
+      }
+      this.phys.detachTrailer();
+      this.world.collision.addDynamic(t.parkedBox);
+      this.audio.playHitch(false);
+      this.ui.toast('Trailer uncoupled');
+    } else if (this.canCouple()) {
+      this.world.collision.removeDynamic(t.parkedBox);
+      this.phys.attachTrailer(t);
+      this.audio.playHitch(true);
+      this.vibrate(60);
+      this.ui.toast('Trailer coupled');
+    } else {
+      this.ui.toast('Reverse the fifth wheel under the trailer kingpin');
+    }
   }
 
   clearMission() {
     if (this.mission) this.mission.dispose(this.scene);
     this.mission = null;
+    this.removeTrailer();
   }
 
   toMenu() {
@@ -258,8 +335,8 @@ class Game {
     this.audio.unlock();
     this.clearMission();
     const job = JOBS[this.save.data.nextJobIndex % JOBS.length];
-    this.mission = new Mission(this.scene, job);
     this.resetTruck(SPAWN.x, SPAWN.z, SPAWN.heading);
+    this.mission = new Mission(this.scene, job, this.spawnTrailer(job));
     this.phys.condition = 100;
     this.state = 'offer';
     this.ui.setDrivingUI(false);
@@ -301,8 +378,8 @@ class Game {
   restartDelivery() {
     const job = this.mission ? this.mission.job : JOBS[0];
     this.clearMission();
-    this.mission = new Mission(this.scene, job);
     this.resetTruck(SPAWN.x, SPAWN.z, SPAWN.heading);
+    this.mission = new Mission(this.scene, job, this.spawnTrailer(job));
     this.phys.condition = 100;
     this.startDriving();
   }
@@ -370,11 +447,41 @@ class Game {
       this.audio.playClick();
       this.ui.toast('Tilt centred', 800);
     }
+    if (inp.consumeAction('hitch')) {
+      this.audio.playClick();
+      this.toggleHitch();
+    }
     if (inp.consumeAction('reset')) {
       this.audio.playClick();
       this.recoverTruck();
     }
     inp.consumeAction('confirm');
+  }
+
+  /** Hitch button, coupling guidance and jackknife warning. */
+  updateTrailerHUD() {
+    const t = this.trailer;
+    const p = this.phys;
+    let hint = '';
+    let hitch = null; // null = hidden, else button label
+    if (t) {
+      if (t.attached) {
+        if (Math.abs(p.speed) < MISSION.coupleSpeed) hitch = 'UNHITCH';
+        if (Math.abs(p.articulation) > JACKKNIFE_WARN) hint = p.speed < 0 ? 'Jackknife! Drive forward to straighten' : 'Sharp trailer angle';
+      } else {
+        const d = Math.hypot(p.hitchX - t.kx, p.hitchZ - t.kz);
+        if (this.canCouple()) {
+          hitch = 'HITCH';
+          hint = 'Tap HITCH to couple';
+        } else if (d < 15) {
+          const ang = Math.abs(wrapAngle(p.heading - t.heading)) * 57.3;
+          hint = `Reverse under the trailer: ${d.toFixed(1)} m` + (ang > 20 ? ` · straighten ${ang.toFixed(0)}°` : '');
+        }
+      }
+    }
+    this.ui.setTrailerHUD(hint, hitch);
+    // Pull the chase camera back when towing so the trailer stays in view.
+    this.cameraRig.extraDistance = t && t.attached ? t.type.length * 0.55 : 0;
   }
 
   updateSafeSpot(dt) {
@@ -445,6 +552,7 @@ class Game {
       dt
     );
     this.model.update(this.phys, input, dt);
+    if (this.trailerModel) this.trailerModel.update(this.trailer, this.phys.trailer ? this.phys.speed : 0, input.brake > 0 && !!this.phys.trailer, dt);
 
     const event = this.mission.update(this.phys, dt, this.time);
     if (event === 'complete') this.completeDelivery();
@@ -477,14 +585,15 @@ class Game {
         rpm: this.phys.rpm,
         tilt: this.input.steerMode === 'tilt' ? this.input.tiltSteer : undefined,
         condition: this.phys.condition,
-        objective: `Deliver to ${m.job.destination}`,
+        objective: m.stage === 'couple' ? `Couple the ${this.trailer.type.name.toLowerCase()}` : `Deliver to ${m.job.destination}`,
         distance: m.distanceTo(this.phys),
         bearing: m.relativeBearing(this.phys),
         money: this.save.data.money,
         unload: m.state === 'active' ? m.unloadProgress : 0,
         inZone: m.inZone(this.phys),
       });
-      this.minimap.draw(this.phys, m.job.zone);
+      this.minimap.draw(this.phys, m.target(), this.trailer);
+      this.updateTrailerHUD();
     } else if (this.state === 'menu' || this.state === 'offer' || this.state === 'garage') {
       // Slow showcase orbit around the parked truck.
       if (this.camera.fov !== this.baseFov) {

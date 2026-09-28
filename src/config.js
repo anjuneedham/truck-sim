@@ -101,6 +101,13 @@ export const MISSION = {
   payPerKm: 900, // $ per km of route
   basePay: 250,
   timeBonusMax: 300,
+  parSpeedKmh: 35, // average speed that earns zero time bonus (rigid truck)
+  parSpeedTrailerKmh: 24, // same for semi-trailer jobs (coupling + wider turns)
+  trailerPayMultiplier: 1.35, // semi-trailer jobs pay more than rigid-truck jobs
+  coupleDistance: 1.0, // m between fifth wheel and kingpin to allow coupling
+  coupleAngle: 0.35, // rad max misalignment for coupling
+  coupleSpeed: 1.5, // m/s max speed for coupling/uncoupling
+  trailerSpawnGap: 5.5, // m the parked trailer's kingpin sits behind the truck's fifth wheel
 };
 
 export const WORLD = {

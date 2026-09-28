@@ -221,6 +221,16 @@ export class AudioSystem {
     this.noiseBurst({ duration: 0.18, filterType: 'bandpass', freq: 4200, gain: 0.05, q: 2 });
   }
 
+  /** Coupling clunk (coupled) or air-line release hiss (uncoupled). */
+  playHitch(coupled) {
+    if (coupled) {
+      this.tone(90, 0, 0.25, 0.3, 'triangle');
+      this.noiseBurst({ duration: 0.15, filterType: 'lowpass', freq: 600, gain: 0.3 });
+    } else {
+      this.noiseBurst({ duration: 0.6, filterType: 'highpass', freq: 3000, gain: 0.1 });
+    }
+  }
+
   playClick() {
     this.tone(900, 0, 0.06, 0.12, 'triangle');
   }

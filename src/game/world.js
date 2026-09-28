@@ -319,8 +319,8 @@ export class World {
       segments.push({ x: d[0] - 1, z, len: 4, angle: 0, kind: 'jersey' });
       segments.push({ x: d[2] + 1, z, len: 4, angle: 0, kind: 'jersey' });
     }
-    // A short chicane of blocks in the depot for practice.
-    for (const [x, z] of [[-86, 150], [-86, 170], [-134, 160]]) {
+    // Practice blocks along the depot's west side (clear of the exit swing).
+    for (const [x, z] of [[-140, 142], [-140, 160], [-140, 178]]) {
       segments.push({ x, z, len: 4, angle: Math.PI / 2, kind: 'jersey' });
     }
 

@@ -66,6 +66,15 @@ export class CollisionWorld {
     this.cellSize = cellSize;
     this.cells = new Map();
     this.all = [];
+    this.dynamic = new Set(); // movable colliders (e.g. parked trailers), always tested
+  }
+
+  addDynamic(box) {
+    this.dynamic.add(box);
+  }
+
+  removeDynamic(box) {
+    this.dynamic.delete(box);
   }
 
   key(ix, iz) {
@@ -101,6 +110,12 @@ export class CollisionWorld {
           }
         }
       }
+    }
+    for (const b of this.dynamic) {
+      const dx = b.x - x;
+      const dz = b.z - z;
+      const rr = b.radius + r;
+      if (dx * dx + dz * dz <= rr * rr) out.push(b);
     }
     return out;
   }

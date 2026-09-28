@@ -35,6 +35,7 @@ export class TruckPhysics {
     this.spec = spec;
     this.steerSensitivity = 1; // player setting, scales steering rate
     this.surfaceAt = null; // optional (x, z) => 'road' | 'grass'
+    this.trailer = null; // coupled TrailerPhysics, if any
     this.box = makeBox(0, 0, spec.width / 2, spec.length / 2, 0);
     this.condition = 100; // % - simple cargo/truck condition
     this.collisionCount = 0;
@@ -68,7 +69,36 @@ export class TruckPhysics {
     this.lastImpact = 0; // m/s of the latest collision (read by game for FX)
     this.scraping = 0; // m/s of sliding contact this step (for scrape audio)
     this.shiftedThisStep = false;
+    this.articulation = 0;
     setBoxTransform(this.box, x, z, heading);
+  }
+
+  /** Fifth wheel (hitch) position in world space. */
+  get hitchX() {
+    return this.x + Math.sin(this.heading) * (this.spec.rearAxleOffset + 0.2);
+  }
+
+  get hitchZ() {
+    return this.z + Math.cos(this.heading) * (this.spec.rearAxleOffset + 0.2);
+  }
+
+  /** Total moving mass (truck + coupled trailer + cargo). */
+  get totalMass() {
+    return this.spec.mass + (this.trailer ? this.trailer.mass : 0);
+  }
+
+  attachTrailer(trailer) {
+    this.trailer = trailer;
+    trailer.attached = true;
+    this.articulation = trailer.follow(this.hitchX, this.hitchZ, this.heading);
+  }
+
+  detachTrailer() {
+    const t = this.trailer;
+    if (t) t.attached = false;
+    this.trailer = null;
+    this.articulation = 0;
+    return t;
   }
 
   /** Returns true if the gear changed. */
@@ -179,14 +209,18 @@ export class TruckPhysics {
       force += dir * f * throttle * limiter;
     }
     // Drag + rolling resistance always oppose motion.
+    const M = this.totalMass;
+    const loadFrac = T.mass / M; // 1 with no trailer, smaller when heavily loaded
     const rolling = T.rollingResistance * surf.rolling;
-    force -= T.dragCoeff * v * Math.abs(v) + Math.sign(v) * rolling * T.mass * G;
+    const drag = T.dragCoeff + (this.trailer ? this.trailer.type.drag : 0);
+    force -= drag * v * Math.abs(v) + Math.sign(v) * rolling * M * G;
 
-    let newSpeed = v + (force / T.mass) * dt;
+    let newSpeed = v + (force / M) * dt;
 
     // Brakes / engine braking reduce |speed| without reversing direction.
-    let decel = brake * T.brakeDecel;
-    if (throttle === 0) decel += T.engineBrakeDecel + this.rpm * T.engineBrakeRpmDecel;
+    // Trailer brakes help, but a heavy rig still stops a little longer.
+    let decel = brake * T.brakeDecel * (0.8 + 0.2 * loadFrac);
+    if (throttle === 0) decel += (T.engineBrakeDecel + this.rpm * T.engineBrakeRpmDecel) * loadFrac;
     if (decel > 0) {
       const dv = decel * dt;
       if (Math.abs(newSpeed) <= dv) newSpeed = 0;
@@ -228,12 +262,35 @@ export class TruckPhysics {
     for (let i = 0; i < steps; i++) {
       this.integrate(h);
       if (collisionWorld) this.resolveCollisions(collisionWorld);
+      if (this.trailer) this.stepTrailer(collisionWorld);
     }
     if (this.lastImpact > 0.5) {
       this.collisionCount++;
       const over = this.lastImpact - T.damageThreshold;
       if (over > 0) this.condition = Math.max(0, this.condition - over * T.damagePerImpact);
     }
+  }
+
+  /** Drag the coupled trailer along and resolve its collisions against the world. */
+  stepTrailer(world) {
+    const t = this.trailer;
+    this.articulation = t.follow(this.hitchX, this.hitchZ, this.heading);
+    // Reversing into a jackknife: the trailer nose is against the cab, the rig stops.
+    if (t.jackknifed && this.speed < 0) this.speed *= 0.5;
+    if (!world) return;
+    const res = t.collide(world, this.speed, this.heading);
+    if (!res) return;
+    // The rig is one body: push the truck by the same amount.
+    this.x += res.px;
+    this.z += res.pz;
+    setBoxTransform(this.box, this.x, this.z, this.heading);
+    if (res.into > 0.05) {
+      if (res.into > this.lastImpact) this.lastImpact = res.into;
+      this.scraping = Math.max(this.scraping, Math.abs(this.speed));
+      // Absorb most of the motion; hard trailer hits nearly stop the rig.
+      this.speed *= res.into > 2 ? 0.25 : 0.7;
+    }
+    this.articulation = t.follow(this.hitchX, this.hitchZ, this.heading);
   }
 
   integrate(h) {

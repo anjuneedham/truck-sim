@@ -160,7 +160,8 @@ export class UI {
   showOffer(mission, fromName) {
     $('offer-from').textContent = fromName;
     $('offer-to').textContent = mission.job.destination;
-    $('offer-cargo').textContent = mission.job.cargo;
+    $('offer-cargo').textContent = `${mission.job.cargo} (${((mission.job.cargoMass || 0) / 1000).toFixed(1)} t)`;
+    $('offer-trailer').textContent = mission.trailer ? `${mission.trailer.type.name} · ${mission.trailer.type.operator}` : 'Carried in your box truck';
     $('offer-distance').textContent = mission.routeKm.toFixed(2) + ' km';
     $('offer-pay').textContent = formatMoney(mission.basePay);
     this.showScreen('screen-offer');
@@ -272,6 +273,23 @@ export class UI {
       $('hud-unload').classList.toggle('hidden', !showUnload);
     }
     if (showUnload) $('hud-unload-bar').style.width = Math.round(unload * 100) + '%';
+  }
+
+  /** Trailer guidance line + hitch button (label or null to hide). */
+  setTrailerHUD(hint, hitchLabel) {
+    if (this.hudCache.trailerHint !== hint) {
+      this.hudCache.trailerHint = hint;
+      $('hud-hint').textContent = hint;
+      $('hud-hint').classList.toggle('hidden', !hint);
+      $('hud-hint').classList.toggle('warn', hint.startsWith('Jackknife'));
+    }
+    if (this.hudCache.hitch !== hitchLabel) {
+      this.hudCache.hitch = hitchLabel;
+      const b = $('ctrl-hitch');
+      b.classList.toggle('hidden', !hitchLabel);
+      b.classList.toggle('ready', hitchLabel === 'HITCH');
+      if (hitchLabel) b.textContent = hitchLabel;
+    }
   }
 
   setFps(fps) {

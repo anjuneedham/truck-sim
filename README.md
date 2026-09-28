@@ -40,9 +40,21 @@ that you can open directly or host anywhere.
 | Zoom | Pinch on the 3D view | Mouse wheel |
 | Re-centre tilt | **RE-CENTRE** (tilt mode) | n/a |
 | Recover truck | **RESET** | `T` |
+| Couple / uncouple trailer | **HITCH** / **UNHITCH** (appears when possible) | `H` |
 | Pause | **❚❚** (top right) | `Esc` / `P` |
 
 In Reverse, **GAS** drives backwards. Hold **BRAKE** to stop and stay stopped.
+
+## Trucks and trailers
+
+Pick a truck in the **Garage**. The Mercer box truck carries cargo itself.
+The three tractor units (Kestrel, Ridgeline, Vanta) haul semi-trailers: each
+job parks the right trailer behind you (box, refrigerated, flatbed, tanker or
+container). Reverse the fifth wheel under the trailer's kingpin, tap
+**HITCH**, then park the *trailer* on the green pad to deliver. Reversing
+with steering jackknifes the trailer; drive forward to straighten it.
+
+Truck data lives in `src/data/trucks.js`; trailer types live in `src/data/trailers.js`.
 
 ## Gameplay loop
 

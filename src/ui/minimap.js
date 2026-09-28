@@ -39,7 +39,7 @@ export class Minimap {
     this.mapImage = full;
   }
 
-  draw(phys, target) {
+  draw(phys, target, trailer = null) {
     const { ctx, size, scale } = this;
     const half = size / 2;
     ctx.save();
@@ -59,6 +59,20 @@ export class Minimap {
 
     ctx.drawImage(this.mapImage, -WORLD.halfSize * scale, -WORLD.halfSize * scale);
 
+    if (trailer) {
+      // Trailer drawn to scale (orange when parked, white when coupled).
+      const len = trailer.type.length;
+      const fx = Math.sin(trailer.heading);
+      const fz = Math.cos(trailer.heading);
+      const x0 = trailer.kx + fx * trailer.type.kingpin;
+      const z0 = trailer.kz + fz * trailer.type.kingpin;
+      ctx.strokeStyle = trailer.attached ? '#f2f2f2' : '#ffb62e';
+      ctx.lineWidth = Math.max(3, trailer.type.width * scale);
+      ctx.beginPath();
+      ctx.moveTo(x0 * scale, z0 * scale);
+      ctx.lineTo((x0 - fx * len) * scale, (z0 - fz * len) * scale);
+      ctx.stroke();
+    }
     if (target) {
       ctx.fillStyle = '#44ff88';
       ctx.beginPath();

@@ -812,3 +812,39 @@ input[type='range'] {
   background: var(--accent);
   transition: width 0.25s;
 }
+
+/* ---------- Trailer HUD ---------- */
+.hud-hint {
+  position: absolute;
+  top: calc(70px + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 7px 14px;
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.hud-hint.warn {
+  background: rgba(200, 40, 30, 0.9);
+}
+.ctrl-hitch {
+  font-size: 11px;
+}
+.ctrl-hitch.ready {
+  background: var(--good);
+  color: #062;
+  border-color: #fff;
+  animation: pulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes pulse {
+  to {
+    transform: scale(1.08);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ctrl-hitch.ready {
+    animation: none;
+  }
+}

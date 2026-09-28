@@ -297,11 +297,11 @@ try {
   await g('(game.cameraRig.zoom = 1, true)');
 
   // ---- Collision: drive into a jersey barrier in the depot (at x=-86, z=150, 4m long along X)
-  await g('(game.resetTruck(-86, 140, 0), game.phys.condition = 100, true)');
+  await g('(game.resetTruck(-140, 132, 0), game.phys.condition = 100, true)');
   await holdKeys(['ArrowUp'], 3500);
   const col = await g('({z: game.phys.z, v: game.phys.speed, c: game.phys.condition, n: game.phys.collisionCount})');
-  // Barrier near face at z=149.6; truck front = z + 4.5 must not pass it by more than a small tolerance.
-  check('Collision blocks the truck', col.z + 4.5 < 149.7 && col.n > 0, `front z=${(col.z + 4.5).toFixed(2)} hits=${col.n}`);
+  // Barrier near face at z=141.6; truck front = z + 4.5 must not pass it by more than a small tolerance.
+  check('Collision blocks the truck', col.z + 4.5 < 141.7 && col.n > 0, `front z=${(col.z + 4.5).toFixed(2)} hits=${col.n}`);
   await shot('06-collision');
   // Hard hit into a building wall to test damage
   await g('(game.resetTruck(-110, 60, Math.PI), game.phys.speed = -0, true)');
@@ -406,16 +406,155 @@ try {
   await page.click('#btn-garage-back');
   check('Leaving garage restores the selected truck', (await g('game.model.entry.id')) === 'kestrel-c400' && (await visible('#screen-menu')));
 
-  // ---- Full route drive (with the newly selected tractor): an autopilot feeds the same input interface the
-  // player uses and drives depot -> Eastgate Warehouse through real junctions.
+  // ---- Phase 3: trailers
+  // Render every trailer type behind the tractor for visual review.
+  for (const type of ['box', 'reefer', 'flatbed', 'tanker', 'container']) {
+    await page.evaluate((t) => window.__game.spawnTrailer({ trailer: t, cargoMass: 0 }), type);
+    await wait(300);
+    await page.evaluate(() => {
+      const g = window.__game;
+      g.state = 'debug-shot';
+      document.getElementById('screen-menu').classList.add('hidden');
+      g.camera.position.set(g.phys.x + 14, 7, g.phys.z - 4);
+      g.camera.lookAt(g.phys.x, 1.5, g.phys.z - 9);
+    });
+    await wait(200);
+    await shot(`11-trailer-${type}`);
+    await page.evaluate(() => {
+      window.__game.state = 'menu';
+      document.getElementById('screen-menu').classList.remove('hidden');
+    });
+  }
+  check('All 5 trailer types build without errors', errors.length === 0, errors.slice(0, 2).join(' | '));
+  await page.evaluate(() => window.__game.removeTrailer());
+
   await page.evaluate(() => {
     window.__game.save.data.nextJobIndex = 0;
   });
   await page.click('#btn-play');
+  check('Job offer shows trailer for a tractor', (await page.textContent('#offer-trailer')).includes('Box trailer'));
   await page.click('#btn-offer-accept');
+  const tr0 = await g('({attached: game.trailer.attached, stage: game.mission.stage})');
+  check('Trailer spawns parked behind the tractor', tr0.attached === false && tr0.stage === 'couple');
+  await wait(200);
+  check('Objective asks to couple the trailer', (await page.textContent('#hud-objective')).startsWith('Couple'));
+  check('HITCH button hidden when not lined up', !(await visible('#ctrl-hitch')));
+  await page.keyboard.press('KeyH');
+  await wait(100);
+  check('Coupling refused when not under the kingpin', (await g('game.trailer.attached')) === false);
+  await wait(400);
+  check('Coupling guidance shown', (await page.textContent('#hud-hint')).startsWith('Reverse under the trailer'));
+
+  // Reverse straight back under the kingpin with the real controls.
+  async function reverseUnderTrailer() {
+    await page.keyboard.press('KeyR');
+    await wait(120);
+    await page.keyboard.down('ArrowUp');
+    const t0 = Date.now();
+    while (Date.now() - t0 < 12000 && !(await g('game.canCouple()'))) await wait(50);
+    await page.keyboard.up('ArrowUp');
+    await page.keyboard.down('Space');
+    await waitStopped(4000);
+    await page.keyboard.up('Space');
+    return g('game.canCouple()');
+  }
+  const lined = await reverseUnderTrailer();
+  check('Reversing lines the fifth wheel up under the kingpin', lined);
+  await wait(200);
+  check('HITCH button appears when coupling is possible', (await visible('#ctrl-hitch')) && (await page.textContent('#ctrl-hitch')) === 'HITCH');
+  await shot('12-ready-to-couple');
+  const hb = await page.locator('#ctrl-hitch').boundingBox();
+  await touch('touchStart', [{ x: hb.x + 10, y: hb.y + 10, id: 9 }]);
+  await touch('touchEnd', []);
+  await wait(150);
+  check('HITCH button couples the trailer', (await g('game.trailer.attached')) === true && (await g('game.mission.stage')) === 'deliver');
+  check('Rig mass includes trailer + cargo', (await g('game.phys.totalMass')) > (await g('game.phys.spec.mass')) + 6000);
+  await page.keyboard.press('KeyR');
+  await wait(120);
+  await holdKeys(['ArrowUp'], 2500);
+  const follow = await g('({d: Math.hypot(game.phys.hitchX - game.trailer.kx, game.phys.hitchZ - game.trailer.kz), v: game.phys.speed, art: game.phys.articulation})');
+  check('Coupled trailer follows the fifth wheel', follow.d < 0.01 && follow.v > 1 && Math.abs(follow.art) < 0.05, `gap ${follow.d.toFixed(3)} m`);
+  await page.keyboard.down('Space');
+  await waitStopped();
+  await page.keyboard.up('Space');
+  // Uncouple, drive away, come back and recouple.
+  await page.keyboard.press('KeyH');
+  await wait(100);
+  check('Uncoupling leaves the trailer parked', (await g('game.trailer.attached')) === false && (await g('game.world.collision.dynamic.has(game.trailer.parkedBox)')));
+  const parkedAt = await g('({x: game.trailer.kx, z: game.trailer.kz})');
+  await holdKeys(['ArrowUp'], 1500);
+  await page.keyboard.down('Space');
+  await waitStopped();
+  await page.keyboard.up('Space');
+  const still = await g('({x: game.trailer.kx, z: game.trailer.kz})');
+  check('Parked trailer stays put', Math.hypot(still.x - parkedAt.x, still.z - parkedAt.z) < 0.01);
+  check('Recoupling works', await reverseUnderTrailer());
+  await page.keyboard.press('KeyH');
+  await wait(100);
+  check('Trailer recoupled', await g('game.trailer.attached'));
+  await page.keyboard.press('KeyR');
+  await wait(120);
+
+  // Jackknife: reverse with steering on the open ring road.
+  await g('(game.resetTruck(-60, 200, Math.PI / 2), true)');
+  await page.keyboard.press('KeyR');
+  await wait(120);
+  await wait(100);
+  await holdKeys(['ArrowUp', 'ArrowRight'], 6000);
+  const jk = await g('({art: game.phys.articulation, jk: game.trailer.jackknifed})');
+  const hint = await page.textContent('#hud-hint');
+  check('Reversing with steer jackknifes the trailer', Math.abs(jk.art) > 1.0, `${(jk.art * 57.3).toFixed(0)} deg`);
+  check('Jackknife warning shown', hint.startsWith('Jackknife'), hint);
+  await shot('13-jackknife');
+  await page.keyboard.down('Space');
+  await waitStopped();
+  await page.keyboard.up('Space');
+  await page.keyboard.press('KeyR');
+  await wait(120);
+  await holdKeys(['ArrowUp'], 4000);
+  check('Driving forward straightens the rig', Math.abs(await g('game.phys.articulation')) < 0.35, `${((await g('game.phys.articulation')) * 57.3).toFixed(0)} deg`);
+  await page.keyboard.down('Space');
+  await waitStopped();
+  await page.keyboard.up('Space');
+
+  // Trailer collision: swing the trailer into the north guardrail (z = 211).
+  await g('(game.resetTruck(-60, 207, Math.PI / 2), game.phys.collisionCount = 0, true)');
+  await page.keyboard.press('KeyR');
+  await wait(120);
+  await page.keyboard.down('ArrowUp');
+  await page.keyboard.down('ArrowRight');
+  let maxZ = 0;
+  for (let i = 0; i < 40; i++) {
+    const zc = await g(`(() => { const b = game.trailer.box; let m = -1e9; for (const sw of [-1, 1]) for (const sl of [-1, 1]) m = Math.max(m, b.z + b.ax[1] * b.halfW * sw + b.az[1] * b.halfL * sl); return m; })()`);
+    maxZ = Math.max(maxZ, zc);
+    await wait(100);
+  }
+  await page.keyboard.up('ArrowRight');
+  await page.keyboard.up('ArrowUp');
+  const tHits = await g('game.phys.collisionCount');
+  check('Trailer collides with the guardrail', tHits > 0 && maxZ > 209, `max trailer z ${maxZ.toFixed(2)}, hits ${tHits}`);
+  check('Trailer does not pass through the guardrail', maxZ < 211.2, `${maxZ.toFixed(2)}`);
+  await page.keyboard.down('Space');
+  await waitStopped();
+  await page.keyboard.up('Space');
+  await page.keyboard.press('KeyR');
+  await wait(120);
+
+  // ---- Full route drive with a loaded trailer: autopilot uses the player input interface.
+  await page.keyboard.press('Escape');
+  await page.click('#btn-restart');
+  await wait(100);
+  await page.evaluate(() => {
+    const g = window.__game;
+    // Couple straight away (coupling itself is tested above).
+    g.resetTruck(g.phys.x, g.phys.z, g.phys.heading);
+    g.world.collision.removeDynamic(g.trailer.parkedBox);
+    g.trailer.place(g.phys.hitchX, g.phys.hitchZ, g.phys.heading);
+    g.phys.attachTrailer(g.trailer);
+  });
   await page.evaluate(() => {
     const game = window.__game;
-    const wps = [[-110, 185], [-95, 200], [-12, 200], [0, 188], [0, -186], [12, -200], [98, -200], [110, -188], [110, -142]];
+    const wps = [[-110, 188], [-92, 200], [-14, 200], [0, 186], [0, -184], [14, -200], [96, -200], [110, -186], [110, -130]];
     let i = 0;
     game.input.read = () => {
       const ph = game.phys;
@@ -424,17 +563,17 @@ try {
       const d = ph.heading - Math.atan2(tx - ph.x, tz - ph.z);
       const bearing = Math.atan2(Math.sin(d), Math.cos(d));
       const dist = Math.hypot(tx - ph.x, tz - ph.z);
-      let target = Math.abs(bearing) > 0.3 || dist < 25 ? 6 : 16;
-      if (i === wps.length - 1 && dist < 10) target = 0;
+      let target = Math.abs(bearing) > 0.3 || dist < 25 ? 5 : 14;
+      if (i === wps.length - 1 && dist < 8) target = 0;
       const v = ph.speed;
       return { steer: Math.max(-1, Math.min(1, bearing * 2.5)), throttle: v < target ? 1 : 0, brake: v > target + 1.5 || target === 0 ? 1 : 0 };
     };
   });
   await wait(4000);
   await shot('08-road');
-  await page.waitForFunction(() => window.__game.state !== 'driving', null, { timeout: 180000 });
-  const drive = await g('({s: game.state, hits: game.phys.collisionCount, t: game.mission.elapsed})');
-  check('Full route driven to destination and delivered', drive.s === 'complete', `time ${drive.t.toFixed(0)}s, collisions ${drive.hits}`);
+  await page.waitForFunction(() => window.__game.state !== 'driving', null, { timeout: 240000 });
+  const drive = await g('({s: game.state, hits: game.phys.collisionCount, t: game.mission ? game.mission.elapsed : 0})');
+  check('Loaded trailer driven to destination and delivered', drive.s === 'complete', `time ${drive.t.toFixed(0)}s, collisions ${drive.hits}`);
   await shot('09-route-complete');
 
   console.log(`(headless software-rendered fps: ${await g('game.fps')})`);
