@@ -47,8 +47,22 @@ export class UI {
     bind('btn-complete-menu', () => handlers.toMenu());
     bind('btn-retry', () => handlers.restart());
     bind('btn-failed-menu', () => handlers.toMenu());
+    // Two-tap confirmation built into the button (no blocking browser dialogs).
+    let resetArmed = null;
     bind('btn-reset-progress', () => {
-      if (window.confirm('Reset money and completed deliveries?')) handlers.resetProgress();
+      const btn = $('btn-reset-progress');
+      if (resetArmed) {
+        clearTimeout(resetArmed);
+        resetArmed = null;
+        btn.textContent = 'Reset save';
+        handlers.resetProgress();
+        return;
+      }
+      btn.textContent = 'Tap again to reset';
+      resetArmed = setTimeout(() => {
+        resetArmed = null;
+        btn.textContent = 'Reset save';
+      }, 3000);
     });
     bind('btn-rotate-dismiss', () => {
       this.rotateDismissed = true;
