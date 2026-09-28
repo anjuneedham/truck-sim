@@ -30,8 +30,35 @@
         </div>
         <div class="menu-buttons">
           <button class="btn btn-primary" id="btn-play">Play</button>
+          <button class="btn" id="btn-garage">Garage</button>
           <button class="btn" id="btn-settings">Settings</button>
           <button class="btn btn-ghost" id="btn-fullscreen">Fullscreen</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ GARAGE / TRUCK SELECTION ============ -->
+    <section id="screen-garage" class="screen screen-side hidden">
+      <div class="panel garage-panel">
+        <div class="garage-head">
+          <h2>Garage</h2>
+          <span class="garage-count" id="garage-count">1 / 4</span>
+        </div>
+        <div class="garage-picker">
+          <button class="btn btn-icon" id="btn-garage-prev" aria-label="Previous truck">&#9664;</button>
+          <div class="garage-name">
+            <small id="garage-make">Mercer</small>
+            <strong id="garage-model">M-Box 9</strong>
+            <span class="plate" id="garage-plate">HR AB 1234</span>
+          </div>
+          <button class="btn btn-icon" id="btn-garage-next" aria-label="Next truck">&#9654;</button>
+        </div>
+        <p class="hint" id="garage-desc"></p>
+        <div class="garage-tags" id="garage-tags"></div>
+        <dl class="stats" id="garage-stats"></dl>
+        <div class="btn-row">
+          <button class="btn" id="btn-garage-back">Back</button>
+          <button class="btn btn-primary" id="btn-garage-select">Select</button>
         </div>
       </div>
     </section>

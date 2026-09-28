@@ -22,6 +22,7 @@ function defaultSave() {
     money: 0,
     deliveriesCompleted: 0,
     nextJobIndex: 0,
+    selectedTruck: 'mercer-mbox9',
     settings: { ...DEFAULT_SETTINGS },
   };
 }

@@ -3,7 +3,7 @@
 
 const $ = (id) => document.getElementById(id);
 
-const SCREENS = ['screen-menu', 'screen-settings', 'screen-offer', 'screen-pause', 'screen-complete', 'screen-failed'];
+const SCREENS = ['screen-menu', 'screen-garage', 'screen-settings', 'screen-offer', 'screen-pause', 'screen-complete', 'screen-failed'];
 
 export function formatMoney(n) {
   return '$' + Math.round(n).toLocaleString('en-US');
@@ -35,6 +35,11 @@ export class UI {
     };
     bind('btn-play', () => handlers.play());
     bind('btn-settings', () => this.openSettings('screen-menu'));
+    bind('btn-garage', () => handlers.openGarage());
+    bind('btn-garage-prev', () => handlers.garageStep(-1));
+    bind('btn-garage-next', () => handlers.garageStep(1));
+    bind('btn-garage-select', () => handlers.garageSelect());
+    bind('btn-garage-back', () => handlers.garageBack());
     bind('btn-fullscreen', () => handlers.fullscreen());
     bind('btn-settings-back', () => this.closeSettings());
     bind('btn-offer-back', () => handlers.toMenu());
@@ -169,6 +174,56 @@ export class UI {
     $('res-total').textContent = formatMoney(result.total);
     $('res-balance').textContent = formatMoney(balance);
     this.showScreen('screen-complete');
+  }
+
+  /**
+   * Render the garage card for one truck.
+   * @param {object} v { entry, index, total, plate, stats, selected }
+   */
+  showGarage(v) {
+    const { entry, stats } = v;
+    $('garage-count').textContent = `${v.index + 1} / ${v.total}`;
+    $('garage-make').textContent = entry.make;
+    $('garage-model').textContent = entry.model;
+    $('garage-plate').textContent = v.plate;
+    $('garage-desc').textContent = entry.description;
+    const bodyLabel = entry.body === 'rigid' ? 'Rigid box truck' : 'Tractor unit';
+    const cabLabel = { cabover: 'Cabover', conventional: 'Long hood', aero: 'Aero cab' }[entry.cab];
+    $('garage-tags').innerHTML = '';
+    for (const [text, cls] of [
+      [bodyLabel, ''],
+      [cabLabel, ''],
+      ...(v.selected ? [['In use', 'good']] : []),
+    ]) {
+      const t = document.createElement('span');
+      t.className = 'tag ' + cls;
+      t.textContent = text;
+      $('garage-tags').appendChild(t);
+    }
+    const rows = [
+      ['Power', stats.power],
+      ['Top speed', stats.topSpeed],
+      ['Braking', stats.braking],
+      ['Handling', stats.handling],
+      ['Weight', stats.weight],
+      ['Fuel tank', stats.fuel],
+    ];
+    const dl = $('garage-stats');
+    dl.innerHTML = '';
+    for (const [name, st] of rows) {
+      const dt = document.createElement('dt');
+      dt.textContent = name;
+      const dd = document.createElement('dd');
+      dd.innerHTML = `<div class="bar"><div style="width:${Math.round(st.bar * 100)}%"></div></div>`;
+      const val = document.createElement('dd');
+      val.className = 'val';
+      val.textContent = st.label;
+      dl.append(dt, dd, val);
+    }
+    const sel = $('btn-garage-select');
+    sel.textContent = v.selected ? 'Selected' : 'Select';
+    sel.disabled = v.selected;
+    this.showScreen('screen-garage');
   }
 
   showFailed(reason) {

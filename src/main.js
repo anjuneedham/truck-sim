@@ -19,6 +19,7 @@ import { CameraRig } from './game/cameraRig.js';
 import { Mission } from './game/mission.js';
 import { JOBS, SPAWN, LOTS, distanceToRoad, insideRect } from './game/mapData.js';
 import { UI } from './ui/ui.js';
+import { TRUCK_CATALOGUE, getTruck, buildSpec, truckStats, plateFor } from './data/trucks.js';
 import { Minimap } from './ui/minimap.js';
 
 const PHYSICS_DT = 1 / 60;
@@ -42,10 +43,12 @@ class Game {
 
     this.initRenderer();
     this.world = new World(this.scene);
-    this.phys = new TruckPhysics();
+    this.truckEntry = getTruck(this.save.data.selectedTruck);
+    this.phys = new TruckPhysics(buildSpec(this.truckEntry));
     this.phys.surfaceAt = (x, z) => this.world.surfaceAt(x, z);
-    this.model = new TruckModel();
+    this.model = new TruckModel(this.truckEntry);
     this.scene.add(this.model.root);
+    this.garageIndex = 0;
     this.cameraRig = new CameraRig(this.camera, this.world.collision);
     this.cameraRig.setPreset(this.save.settings.cameraPreset || 0);
     this.minimap = new Minimap(document.getElementById('minimap'));
@@ -62,6 +65,10 @@ class Game {
       nextJob: () => this.openJobOffer(),
       toMenu: () => this.toMenu(),
       fullscreen: () => this.enterFullscreen(),
+      openGarage: () => this.openGarage(),
+      garageStep: (d) => this.garageStep(d),
+      garageSelect: () => this.garageSelect(),
+      garageBack: () => this.garageBack(),
       setSetting: (k, v) => this.setSetting(k, v),
       resetProgress: () => {
         this.save.resetProgress();
@@ -166,6 +173,61 @@ class Game {
       .catch(() => {});
   }
 
+  // ---------------------------------------------------------------- trucks / garage
+  /** Swap the visible + simulated truck to a catalogue entry. */
+  setTruck(entry) {
+    if (this.model && this.model.entry === entry) return;
+    if (this.model) {
+      this.scene.remove(this.model.root);
+      this.model.dispose();
+    }
+    this.truckEntry = entry;
+    this.model = new TruckModel(entry);
+    this.model.setShadowMode(this.renderer.shadowMap.enabled);
+    this.scene.add(this.model.root);
+    this.phys.setSpec(buildSpec(entry));
+    this.resetTruck(SPAWN.x, SPAWN.z, SPAWN.heading);
+  }
+
+  openGarage() {
+    this.state = 'garage';
+    this.garageIndex = Math.max(0, TRUCK_CATALOGUE.indexOf(this.truckEntry));
+    this.showGarageCard();
+  }
+
+  showGarageCard() {
+    const entry = TRUCK_CATALOGUE[this.garageIndex];
+    this.setTruck(entry); // preview in the 3D view
+    this.ui.showGarage({
+      entry,
+      index: this.garageIndex,
+      total: TRUCK_CATALOGUE.length,
+      plate: plateFor(entry.id),
+      stats: truckStats(entry),
+      selected: entry.id === this.save.data.selectedTruck,
+    });
+  }
+
+  garageStep(d) {
+    const n = TRUCK_CATALOGUE.length;
+    this.garageIndex = (this.garageIndex + d + n) % n;
+    this.showGarageCard();
+  }
+
+  garageSelect() {
+    const entry = TRUCK_CATALOGUE[this.garageIndex];
+    this.save.data.selectedTruck = entry.id;
+    this.save.save();
+    this.ui.toast(`${entry.make} ${entry.model} selected`);
+    this.showGarageCard();
+  }
+
+  garageBack() {
+    // Leaving without selecting restores the truck in use.
+    this.setTruck(getTruck(this.save.data.selectedTruck));
+    this.toMenu();
+  }
+
   // ---------------------------------------------------------------- state changes
   resetTruck(x, z, heading) {
     this.phys.reset(x, z, heading);
@@ -180,6 +242,7 @@ class Game {
 
   toMenu() {
     this.state = 'menu';
+    this.setTruck(getTruck(this.save.data.selectedTruck));
     this.clearMission();
     this.input.enabled = false;
     this.input.releaseAll();
@@ -422,7 +485,7 @@ class Game {
         inZone: m.inZone(this.phys),
       });
       this.minimap.draw(this.phys, m.job.zone);
-    } else if (this.state === 'menu' || this.state === 'offer') {
+    } else if (this.state === 'menu' || this.state === 'offer' || this.state === 'garage') {
       // Slow showcase orbit around the parked truck.
       if (this.camera.fov !== this.baseFov) {
         this.camera.fov = this.baseFov;
@@ -430,8 +493,16 @@ class Game {
       }
       const a = this.time * 0.15;
       const p = this.phys;
-      this.camera.position.set(p.x + Math.sin(a) * 18, 6, p.z + Math.cos(a) * 18);
-      this.camera.lookAt(p.x, 1.8, p.z);
+      const r = this.state === 'garage' ? 15 : 18;
+      const cx = p.x + Math.sin(a) * r;
+      const cz = p.z + Math.cos(a) * r;
+      this.camera.position.set(cx, 6, cz);
+      // In the garage the card covers the right side, so aim right of the
+      // truck to frame it in the free left part of the screen.
+      const side = this.state === 'garage' && this.camera.aspect > 1.2 ? 5 : 0;
+      const vx = (p.x - cx) / r;
+      const vz = (p.z - cz) / r;
+      this.camera.lookAt(p.x - vz * side, 1.8, p.z + vx * side);
       if (this.mission) this.mission.update(this.phys, 0, this.time);
     } else if (this.mission) {
       this.mission.update(this.phys, 0, this.time);

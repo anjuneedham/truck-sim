@@ -377,7 +377,36 @@ try {
   const menuMoney = await page.textContent('#menu-money');
   check('Progress loads after reload', menuMoney === '$' + money1.toLocaleString('en-US'), menuMoney);
 
-  // ---- Full route drive: an autopilot feeds the same input interface the
+  // ---- Phase 2: garage / truck selection
+  await page.click('#btn-garage');
+  check('Garage opens from menu', (await visible('#screen-garage')) && (await g('game.state')) === 'garage');
+  const truckCount = 4;
+  const seen = [];
+  for (let i = 0; i < truckCount; i++) {
+    const info = await g('({id: game.model.entry.id, body: game.model.entry.body, len: game.phys.spec.length, mass: game.phys.spec.mass})');
+    const statRows = await page.locator('#garage-stats dt').count();
+    seen.push(info);
+    await wait(250);
+    await shot(`10-garage-${i}-${info.id}`);
+    if (statRows !== 6) check(`Garage shows 6 stats for ${info.id}`, false, `${statRows}`);
+    await page.click('#btn-garage-next');
+  }
+  const ids = new Set(seen.map((t) => t.id));
+  check('Garage browses every truck in the catalogue', ids.size === 4, [...ids].join(', '));
+  check('Each truck has its own physics spec', new Set(seen.map((t) => t.len + ':' + t.mass)).size === 4);
+  check('Catalogue has rigid and tractor bodies', seen.some((t) => t.body === 'rigid') && seen.some((t) => t.body === 'tractor'));
+  // Select the Kestrel tractor (index 1).
+  await page.click('#btn-garage-next');
+  check('Garage preview swaps the 3D truck', (await g('game.model.entry.id')) === 'kestrel-c400');
+  await page.click('#btn-garage-select');
+  check('Select button marks truck in use', (await page.textContent('#btn-garage-select')) === 'Selected');
+  check('Truck selection saved', (await page.evaluate(() => JSON.parse(localStorage.getItem('truckSim.save.v1')).selectedTruck)) === 'kestrel-c400');
+  // Browse away without selecting, then back out: selected truck is restored.
+  await page.click('#btn-garage-next');
+  await page.click('#btn-garage-back');
+  check('Leaving garage restores the selected truck', (await g('game.model.entry.id')) === 'kestrel-c400' && (await visible('#screen-menu')));
+
+  // ---- Full route drive (with the newly selected tractor): an autopilot feeds the same input interface the
   // player uses and drives depot -> Eastgate Warehouse through real junctions.
   await page.evaluate(() => {
     window.__game.save.data.nextJobIndex = 0;
