@@ -43,6 +43,24 @@ export class AudioSystem {
     this.buildEngine();
     this.buildBrake();
     this.buildBeeper();
+    this.scrapeGain = this.loopNoise('bandpass', 1800, 3);
+    this.rumbleGain = this.loopNoise('lowpass', 140, 1);
+  }
+
+  /** Looping filtered noise with its own gain (starts silent). */
+  loopNoise(type, freq, q) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    const f = this.ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    const g = this.ctx.createGain();
+    g.gain.value = 0;
+    src.connect(f).connect(g).connect(this.sfx);
+    src.start();
+    return g;
   }
 
   setEnabled(master, sfx) {
@@ -114,6 +132,8 @@ export class AudioSystem {
       this.engineGain.gain.setTargetAtTime(0, t, 0.15);
       this.brakeGain.gain.setTargetAtTime(0, t, 0.05);
       this.beepGain.gain.setTargetAtTime(0, t, 0.02);
+      this.scrapeGain.gain.setTargetAtTime(0, t, 0.02);
+      this.rumbleGain.gain.setTargetAtTime(0, t, 0.05);
     }
   }
 
@@ -126,7 +146,7 @@ export class AudioSystem {
     const t = this.ctx.currentTime;
 
     // Diesel-ish: low fundamental, filter opens with throttle.
-    const f = 32 + s.rpm * 70;
+    const f = 28 + s.rpm * 80;
     this.engOsc1.frequency.setTargetAtTime(f, t, 0.08);
     this.engOsc2.frequency.setTargetAtTime(f * 2.02, t, 0.08);
     this.engineFilter.frequency.setTargetAtTime(260 + s.rpm * 700 + s.throttle * 500, t, 0.1);
@@ -140,6 +160,12 @@ export class AudioSystem {
     if (s.brake > 0 && this.lastBrakeSpeed > 1.0 && s.speed <= 1.0) this.playHiss();
     this.lastBrakeSpeed = s.speed;
 
+    // Metal scrape while sliding along a barrier; low rumble on grass.
+    const scrape = s.scraping > 1 ? Math.min(0.12, s.scraping * 0.012) : 0;
+    this.scrapeGain.gain.setTargetAtTime(scrape, t, 0.04);
+    const rumble = s.offroad ? Math.min(0.14, s.speed * 0.012) : 0;
+    this.rumbleGain.gain.setTargetAtTime(rumble, t, 0.1);
+
     // Reverse beeper: 0.5s on / 0.5s off.
     if (s.reverse) {
       this.beepPhase = (this.beepPhase + dt) % 1;
@@ -147,6 +173,8 @@ export class AudioSystem {
     } else {
       this.beepPhase = 0;
       this.beepGain.gain.setTargetAtTime(0, t, 0.02);
+      this.scrapeGain.gain.setTargetAtTime(0, t, 0.02);
+      this.rumbleGain.gain.setTargetAtTime(0, t, 0.05);
     }
   }
 
@@ -186,6 +214,11 @@ export class AudioSystem {
 
   playHiss() {
     this.noiseBurst({ duration: 0.7, filterType: 'highpass', freq: 3500, gain: 0.12 });
+  }
+
+  /** Short air "psst" from the gearbox on each shift. */
+  playShift() {
+    this.noiseBurst({ duration: 0.18, filterType: 'bandpass', freq: 4200, gain: 0.05, q: 2 });
   }
 
   playClick() {

@@ -48,6 +48,23 @@
             <button data-q="low">Low</button><button data-q="medium">Med</button><button data-q="high">High</button>
           </div>
         </div>
+        <div class="row">
+          <span>Steering</span>
+          <div class="segmented" id="set-steer-mode">
+            <button data-v="buttons">Buttons</button><button data-v="wheel">Wheel</button><button data-v="tilt">Tilt</button>
+          </div>
+        </div>
+        <label class="row" for="set-steer-sens">
+          <span>Steering sensitivity <small id="set-steer-sens-val">100%</small></span>
+          <input type="range" id="set-steer-sens" min="50" max="150" step="10" />
+        </label>
+        <div class="row">
+          <span>Control size</span>
+          <div class="segmented" id="set-ctrl-size">
+            <button data-v="small">S</button><button data-v="medium">M</button><button data-v="large">L</button>
+          </div>
+        </div>
+        <label class="row"><span>Vibration</span><input type="checkbox" id="set-vibration" class="toggle" /></label>
         <label class="row"><span>Show FPS</span><input type="checkbox" id="set-fps" class="toggle" /></label>
         <div class="row">
           <span>Progress</span>
@@ -92,7 +109,10 @@
       <canvas id="minimap" width="150" height="150"></canvas>
       <div class="hud-speedo">
         <div class="gear" id="hud-gear">D</div>
-        <div class="speed"><span id="hud-speed">0</span><small>km/h</small></div>
+        <div class="speed-block">
+          <div class="speed"><span id="hud-speed">0</span><small>km/h</small></div>
+          <div class="tacho"><div id="hud-rpm"></div></div>
+        </div>
         <div class="condition"><div class="bar"><div id="hud-condition-bar"></div></div><small id="hud-condition">Condition 100%</small></div>
       </div>
       <div class="unload hidden" id="hud-unload"><div>Unloading&hellip;</div><div class="bar"><div id="hud-unload-bar"></div></div></div>
@@ -101,9 +121,22 @@
 
     <!-- ============ TOUCH CONTROLS ============ -->
     <section id="controls" class="hidden">
-      <div class="steer-pad">
+      <div class="steer-pad" id="steer-buttons">
         <button class="ctrl ctrl-steer" data-hold="left" aria-label="Steer left">&#9664;</button>
         <button class="ctrl ctrl-steer" data-hold="right" aria-label="Steer right">&#9654;</button>
+      </div>
+      <div class="steer-pad hidden" id="steer-wheel">
+        <div class="ctrl ctrl-wheel" id="ctrl-wheel" aria-label="Steering wheel">
+          <div class="wheel-rim"></div>
+          <div class="wheel-spoke wheel-spoke-h"></div>
+          <div class="wheel-spoke wheel-spoke-v"></div>
+          <div class="wheel-hub"></div>
+          <div class="wheel-mark"></div>
+        </div>
+      </div>
+      <div class="steer-pad hidden" id="steer-tilt">
+        <button class="ctrl ctrl-small ctrl-recenter" data-action="recenter" aria-label="Re-centre tilt">RE-<br />CENTRE</button>
+        <div class="tilt-meter"><div id="tilt-indicator"></div></div>
       </div>
       <div class="side-buttons">
         <button class="ctrl ctrl-small" data-action="camera" aria-label="Camera">CAM</button>

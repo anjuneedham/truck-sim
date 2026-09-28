@@ -10,6 +10,10 @@ export const DEFAULT_SETTINGS = {
   quality: 'medium', // low | medium | high
   showFps: false,
   cameraPreset: 0,
+  steeringMode: 'buttons', // buttons | wheel | tilt
+  steerSensitivity: 1.0, // 0.5 .. 1.5
+  controlSize: 'medium', // small | medium | large
+  vibration: true,
 };
 
 function defaultSave() {

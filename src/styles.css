@@ -17,6 +17,7 @@
   --safe-r: env(safe-area-inset-right, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
+  --ctrl-scale: 1; /* set from the Control size setting */
 }
 
 * {
@@ -493,16 +494,15 @@ h2.fail {
   gap: 12px;
 }
 .ctrl-steer {
-  width: clamp(76px, 20vh, 118px);
-  height: clamp(76px, 20vh, 118px);
+  width: calc(clamp(76px, 20vh, 118px) * var(--ctrl-scale));
+  height: calc(clamp(76px, 20vh, 118px) * var(--ctrl-scale));
   font-size: clamp(26px, 6vh, 40px);
   border-radius: 50%;
 }
 .side-buttons {
   position: absolute;
   left: calc(14px + var(--safe-l));
-  top: 50%;
-  transform: translateY(-50%);
+  top: calc(72px + var(--safe-t));
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -553,8 +553,8 @@ h2.fail {
 }
 .ctrl-brake,
 .ctrl-gas {
-  width: clamp(72px, 17vh, 100px);
-  height: clamp(110px, 32vh, 170px);
+  width: calc(clamp(72px, 17vh, 100px) * var(--ctrl-scale));
+  height: calc(clamp(110px, 32vh, 170px) * var(--ctrl-scale));
   font-size: 14px;
   letter-spacing: 1px;
 }
@@ -563,7 +563,7 @@ h2.fail {
 }
 .ctrl-gas {
   border-color: rgba(80, 230, 140, 0.7);
-  height: clamp(130px, 38vh, 200px);
+  height: calc(clamp(130px, 38vh, 200px) * var(--ctrl-scale));
 }
 
 /* ---------- Toast / hints ---------- */
@@ -613,4 +613,106 @@ h2.fail {
   .hud-speedo .speed {
     font-size: 24px;
   }
+}
+
+/* ---------- Steering wheel / tilt ---------- */
+.ctrl-wheel {
+  position: relative;
+  width: calc(clamp(130px, 38vh, 190px) * var(--ctrl-scale));
+  height: calc(clamp(130px, 38vh, 190px) * var(--ctrl-scale));
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  backdrop-filter: none;
+}
+.wheel-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: calc(14px * var(--ctrl-scale)) solid rgba(30, 34, 40, 0.75);
+  box-shadow: 0 0 0 2px var(--ctrl-border), inset 0 0 0 2px var(--ctrl-border);
+}
+.wheel-spoke {
+  position: absolute;
+  background: rgba(30, 34, 40, 0.75);
+}
+.wheel-spoke-h {
+  left: 10%;
+  right: 10%;
+  top: calc(50% - 7px);
+  height: 14px;
+}
+.wheel-spoke-v {
+  left: calc(50% - 7px);
+  width: 14px;
+  top: 50%;
+  bottom: 10%;
+}
+.wheel-hub {
+  position: absolute;
+  left: 34%;
+  top: 34%;
+  width: 32%;
+  height: 32%;
+  border-radius: 50%;
+  background: rgba(20, 24, 30, 0.85);
+  border: 2px solid var(--ctrl-border);
+}
+.wheel-mark {
+  position: absolute;
+  left: calc(50% - 5px);
+  top: 0;
+  width: 10px;
+  height: calc(14px * var(--ctrl-scale));
+  background: var(--accent);
+  border-radius: 3px;
+}
+.ctrl-recenter {
+  height: 56px;
+  line-height: 1.1;
+}
+.tilt-meter {
+  align-self: center;
+  width: 140px;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(20, 24, 30, 0.6);
+  border: 1px solid var(--ctrl-border);
+  position: relative;
+}
+#tilt-indicator {
+  position: absolute;
+  top: -4px;
+  left: calc(50% - 4px);
+  width: 8px;
+  height: 16px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+/* ---------- Tacho / settings extras ---------- */
+.speed-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tacho {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+#hud-rpm {
+  height: 100%;
+  width: 0;
+  background: var(--good);
+}
+.row small {
+  color: var(--muted);
+  margin-left: 6px;
+}
+input[type='range'] {
+  width: 150px;
+  accent-color: var(--accent);
 }

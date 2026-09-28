@@ -3,7 +3,7 @@
 // Exposes hooks to animate wheels, steering, lights and body roll/pitch.
 
 import * as THREE from 'three';
-import { TRUCK } from '../config.js';
+import { TRUCK, SUSPENSION } from '../config.js';
 
 const WHEEL_R = 0.52;
 
@@ -119,7 +119,12 @@ export class TruckModel {
 
     this.wheelSpin = 0;
     this.roll = 0;
+    this.rollVel = 0;
     this.pitch = 0;
+    this.pitchVel = 0;
+    this.heave = 0;
+    this.heaveVel = 0;
+    this.bumpTimer = 0;
   }
 
   /** Sync visuals with the physics state. */
@@ -132,14 +137,35 @@ export class TruckModel {
     for (const w of this.wheels) w.rotation.x = this.wheelSpin;
     for (const p of this.frontPivots) p.rotation.y = -phys.steerAngle * 1.1;
 
-    // Suspension feel: body leans against acceleration and cornering.
-    const targetPitch = THREE.MathUtils.clamp(-phys.accel * 0.006, -0.04, 0.04);
-    const targetRoll = THREE.MathUtils.clamp(phys.latAccel * 0.007, -0.06, 0.06);
-    const k = 1 - Math.exp(-6 * dt);
-    this.pitch += (targetPitch - this.pitch) * k;
-    this.roll += (targetRoll - this.roll) * k;
+    // Suspension: damped springs for pitch, roll and heave. Driven by braking /
+    // acceleration, cornering, surface bumps and impacts, so the body visibly
+    // carries weight and settles with a little overshoot.
+    const S = SUSPENSION;
+    const pitchForce = THREE.MathUtils.clamp(-phys.accel * S.pitchPerAccel, -S.maxPitch, S.maxPitch);
+    const rollForce = THREE.MathUtils.clamp(phys.latAccel * S.rollPerLat, -S.maxRoll, S.maxRoll);
+    const bumpy = phys.surface === 'grass' ? Math.min(1, Math.abs(phys.speed) / 8) : 0;
+    this.bumpTimer -= dt;
+    if (bumpy > 0 && this.bumpTimer <= 0) {
+      this.bumpTimer = 0.08 + Math.random() * 0.15;
+      this.heaveVel += (Math.random() - 0.5) * S.bumpStrength * bumpy;
+      this.rollVel += (Math.random() - 0.5) * S.bumpStrength * 0.6 * bumpy;
+    }
+    if (phys.lastImpact > 1) {
+      this.pitchVel += Math.min(0.6, phys.lastImpact * 0.03) * Math.sign(phys.speed || 1);
+      this.heaveVel += Math.min(0.8, phys.lastImpact * 0.05);
+    }
+    if (dt > 0) {
+      const spring = (pos, vel, target) => {
+        vel += (S.stiffness * (target - pos) - S.damping * vel) * dt;
+        return [pos + vel * dt, vel];
+      };
+      [this.pitch, this.pitchVel] = spring(this.pitch, this.pitchVel, pitchForce);
+      [this.roll, this.rollVel] = spring(this.roll, this.rollVel, rollForce);
+      [this.heave, this.heaveVel] = spring(this.heave, this.heaveVel, 0);
+    }
     this.body.rotation.x = this.pitch;
     this.body.rotation.z = this.roll;
+    this.body.position.y = this.heave * 0.25;
 
     // Lights
     this.tailMat.color.setHex(input.brake > 0 ? 0xff2020 : 0x661111);

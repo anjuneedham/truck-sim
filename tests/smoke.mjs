@@ -183,7 +183,118 @@ try {
   check('Camera preset cycles distance', (await g('game.cameraRig.presetIndex')) === 1 && camDist2 > 18, `dist=${camDist2.toFixed(1)}`);
   await page.keyboard.press('KeyC');
   await page.keyboard.press('KeyC');
+  await wait(1200);
+  const cab = await g('({cx: game.camera.position.x, cz: game.camera.position.z, cy: game.camera.position.y, x: game.phys.x, z: game.phys.z, h: game.phys.heading, p: game.cameraRig.preset.name})');
+  const cabFwd = (cab.cx - cab.x) * Math.sin(cab.h) + (cab.cz - cab.z) * Math.cos(cab.h);
+  check('Cab camera preset sits on the cab', cab.p === 'Cab' && cabFwd > 1 && cab.cy > 2.5 && cab.cy < 4, `fwd=${cabFwd.toFixed(1)}`);
+  await shot('05b-cab-view');
+  await page.keyboard.press('KeyC');
   await wait(300);
+  check('Camera cycles back to chase', (await g('game.cameraRig.presetIndex')) === 0);
+
+  // ---- Phase 1: driving polish
+  // Gearbox: accelerate hard on the straight and confirm upshifts + HUD gear/tacho.
+  await g('(game.resetTruck(-120, 200, Math.PI / 2), true)');
+  await holdKeys(['ArrowUp'], 5000);
+  const gb = await g('({gi: game.phys.gearIndex, rpm: game.phys.engineRpm, v: game.phys.speedKmh})');
+  const hudGear = await page.textContent('#hud-gear');
+  check('Gearbox upshifts under acceleration', gb.gi >= 1 && hudGear === String(gb.gi + 1), `gear ${gb.gi + 1} @ ${gb.v.toFixed(0)} km/h, ${gb.rpm.toFixed(0)} rpm`);
+  check('Tacho shows engine rpm', parseFloat(await page.evaluate(() => document.getElementById('hud-rpm').style.width)) > 10);
+  // Suspension: hard braking pitches the body forward.
+  await page.keyboard.down('ArrowDown');
+  await wait(500);
+  const pitch = await g('game.model.pitch');
+  await waitStopped();
+  await page.keyboard.up('ArrowDown');
+  check('Suspension pitches under braking', pitch > 0.005, `pitch=${pitch.toFixed(3)} rad`);
+  check('Gearbox downshifts back to 1st when stopped', (await g('game.phys.gearIndex')) === 0);
+
+  // Surface: grass is slower than tarmac for the same throttle time.
+  await g('(game.resetTruck(-120, 200, Math.PI / 2), true)');
+  await holdKeys(['ArrowUp'], 2500);
+  const roadV = await g('game.phys.speed');
+  await g('(game.resetTruck(-40, 120, Math.PI / 2), true)');
+  check('Surface detection finds grass off-road', (await g('game.world.surfaceAt(-40, 120)')) === 'grass');
+  await holdKeys(['ArrowUp'], 2500);
+  const grassV = await g('game.phys.speed');
+  check('Grass slows the truck', grassV < roadV * 0.9, `road ${roadV.toFixed(1)} vs grass ${grassV.toFixed(1)} m/s`);
+
+  // High-speed guardrail hit must not tunnel through the thin rail.
+  // North ring road at z=200, rail at z=211. Aim at it at 25 m/s, 30 deg.
+  await g('(game.resetTruck(-60, 204, Math.PI / 2 - 0.5), game.phys.speed = 25, game.phys.gearIndex = 5, true)');
+  await wait(1500);
+  const rail = await g('({z: game.phys.z, h: game.phys.heading})');
+  check('No tunnelling through guardrail at speed', rail.z < 211, `z=${rail.z.toFixed(2)}`);
+  check('Glancing hit turns the truck along the rail', Math.abs(rail.h - (Math.PI / 2 - 0.5)) > 0.05, `heading ${rail.h.toFixed(2)}`);
+
+  // Steering sensitivity setting reaches the physics and persists.
+  await page.evaluate(() => window.__game.setSetting('steerSensitivity', 1.4));
+  check('Steering sensitivity applied', (await g('game.phys.steerSensitivity')) === 1.4);
+  await page.evaluate(() => window.__game.setSetting('steerSensitivity', 1.0));
+
+  // Steering wheel mode: drag the on-screen wheel clockwise.
+  await page.evaluate(() => window.__game.setSetting('steeringMode', 'wheel'));
+  check('Wheel mode shows the steering wheel', (await visible('#ctrl-wheel')) && !(await visible('[data-hold="left"]')));
+  await g('(game.resetTruck(-60, 200, Math.PI / 2), true)');
+  const wb = await page.locator('#ctrl-wheel').boundingBox();
+  const wcx = wb.x + wb.width / 2;
+  const wcy = wb.y + wb.height / 2;
+  const R = wb.width * 0.42;
+  // Start at the top of the rim and sweep clockwise ~90 degrees to the right.
+  await touch('touchStart', [{ x: wcx, y: wcy - R, id: 5 }]);
+  for (let a = 0; a <= 90; a += 15) {
+    const rad = (a * Math.PI) / 180;
+    await touch('touchMove', [{ x: wcx + Math.sin(rad) * R, y: wcy - Math.cos(rad) * R, id: 5 }]);
+  }
+  await wait(50);
+  const wheelIn = await g('game.input.read().steer');
+  await touch('touchStart', [{ x: wcx + R, y: wcy, id: 5 }, pGas]);
+  await wait(900);
+  const wheelSteer = await g('game.phys.steerAngle');
+  await touch('touchEnd', []);
+  check('Steering wheel drag steers right', wheelIn > 0.5 && wheelSteer > 0.1, `input=${wheelIn.toFixed(2)} angle=${wheelSteer.toFixed(2)}`);
+  await wait(800);
+  check('Steering wheel springs back to centre', Math.abs(await g('game.input.wheelSteer')) < 0.01);
+  await shot('05c-wheel-mode');
+  await page.keyboard.down('Space');
+  await waitStopped();
+  await page.keyboard.up('Space');
+
+  // Tilt mode: synthetic device orientation (phone held in landscape).
+  await page.evaluate(() => window.__game.setSetting('steeringMode', 'tilt'));
+  await wait(100);
+  check('Tilt mode shows re-centre control', await visible('#steer-tilt'));
+  const tiltEvent = (beta) =>
+    page.evaluate((b) => window.dispatchEvent(Object.assign(new Event('deviceorientation'), { alpha: 0, beta: b, gamma: b })), beta);
+  await tiltEvent(0); // calibrates zero
+  await tiltEvent(-20);
+  const tiltSteer = await g('game.input.read().steer');
+  check('Tilting the phone steers', Math.abs(tiltSteer) > 0.4, `steer=${tiltSteer.toFixed(2)}`);
+  await tiltEvent(0);
+  check('Level phone = straight', Math.abs(await g('game.input.read().steer')) < 0.01);
+  await page.evaluate(() => window.__game.setSetting('steeringMode', 'buttons'));
+  check('Buttons mode restores arrow buttons', await visible('[data-hold="left"]'));
+
+  // Control size setting scales the on-screen controls.
+  const gasW1 = (await page.locator('[data-hold="throttle"]').boundingBox()).width;
+  await page.evaluate(() => window.__game.setSetting('controlSize', 'large'));
+  const gasW2 = (await page.locator('[data-hold="throttle"]').boundingBox()).width;
+  check('Control size setting enlarges controls', gasW2 > gasW1 * 1.1, `${gasW1.toFixed(0)} -> ${gasW2.toFixed(0)} px`);
+  await page.evaluate(() => window.__game.setSetting('controlSize', 'medium'));
+
+  // Pinch zoom (two fingers spreading on the 3D view) and mouse wheel.
+  const z0 = await g('game.cameraRig.zoom');
+  await touch('touchStart', [{ x: 400, y: 200, id: 7 }, { x: 440, y: 200, id: 8 }]);
+  await touch('touchMove', [{ x: 360, y: 200, id: 7 }, { x: 480, y: 200, id: 8 }]);
+  await touch('touchEnd', []);
+  await wait(100);
+  const z1 = await g('game.cameraRig.zoom');
+  check('Pinch out zooms the camera in', z1 < z0 * 0.8, `${z0.toFixed(2)} -> ${z1.toFixed(2)}`);
+  await page.mouse.move(450, 150);
+  await page.mouse.wheel(0, 600);
+  await wait(100);
+  check('Mouse wheel zooms out', (await g('game.cameraRig.zoom')) > z1, `${(await g('game.cameraRig.zoom')).toFixed(2)}`);
+  await g('(game.cameraRig.zoom = 1, true)');
 
   // ---- Collision: drive into a jersey barrier in the depot (at x=-86, z=150, 4m long along X)
   await g('(game.resetTruck(-86, 140, 0), game.phys.condition = 100, true)');
@@ -285,7 +396,7 @@ try {
       const bearing = Math.atan2(Math.sin(d), Math.cos(d));
       const dist = Math.hypot(tx - ph.x, tz - ph.z);
       let target = Math.abs(bearing) > 0.3 || dist < 25 ? 6 : 16;
-      if (i === wps.length - 1 && dist < 18) target = 0;
+      if (i === wps.length - 1 && dist < 10) target = 0;
       const v = ph.speed;
       return { steer: Math.max(-1, Math.min(1, bearing * 2.5)), throttle: v < target ? 1 : 0, brake: v > target + 1.5 || target === 0 ? 1 : 0 };
     };

@@ -33,10 +33,12 @@ that you can open directly or host anywhere.
 | --- | --- | --- |
 | Accelerate | **GAS** pedal (bottom right) | `W` / `↑` |
 | Brake | **BRAKE** pedal | `S` / `↓` / `Space` |
-| Steer | **◀ ▶** buttons (bottom left) | `A` `D` / `←` `→` |
+| Steer | **◀ ▶** buttons, drag **steering wheel**, or **tilt** (Settings → Steering) | `A` `D` / `←` `→` |
 | Drive / Reverse | **D \| R** switch above the pedals (only when stopped) | `R` |
-| Camera distance | **CAM** | `C` |
+| Camera view (Chase / Far / Close / Cab) | **CAM** | `C` |
 | Look around | Drag anywhere on the 3D view | n/a |
+| Zoom | Pinch on the 3D view | Mouse wheel |
+| Re-centre tilt | **RE-CENTRE** (tilt mode) | n/a |
 | Recover truck | **RESET** | `T` |
 | Pause | **❚❚** (top right) | `Esc` / `P` |
 
@@ -80,12 +82,18 @@ scripts/inline-build.mjs  builds the single-file standalone HTML
 
 ### Tuning the driving feel
 
-Everything is in `src/config.js` → `TRUCK`:
-`engineForce`, `maxSpeedForward`, `brakeDecel`, `brakeRise` (air-brake
-build-up), `maxSteerAngle`, `steerSpeed`, `maxLateralAccel` (grip limit at
-speed), `wheelbase`, `mass`. For reference, the current values give 0 to 60 km/h in
-about 10 s, a top speed of about 84 km/h, a 60 to 0 km/h stop in about 23 m, and a turning
-radius of about 8.4 m at low speed.
+Everything is in `src/config.js`:
+
+- `TRUCK`: engine torque curve, 6-speed auto gearbox (ratios, shift points,
+  shift time), governor, brakes and air-brake build-up, steering rate and
+  limits, grip cap, yaw inertia, collision response.
+- `SURFACES`: grip and rolling resistance for road vs grass.
+- `SUSPENSION`: body spring stiffness and damping, lean amounts, bumpiness.
+- `CAMERA`: presets, lag, speed FOV, turn look-ahead, zoom range.
+
+Current feel: 0 to 60 km/h in about 13 s with five audible gear changes, a
+governed top speed of 90 km/h, a 60 to 0 km/h stop in about 23 m, and a
+turning radius of about 8.4 m at low speed.
 
 ## Performance notes
 

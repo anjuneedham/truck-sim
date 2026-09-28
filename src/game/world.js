@@ -412,6 +412,13 @@ export class World {
     this.group.add(mesh);
   }
 
+  /** Driving surface under a point: paved road/lot or grass. */
+  surfaceAt(x, z) {
+    if (distanceToRoad(x, z) < HALF_ROAD + 0.5) return 'road';
+    for (const r of Object.values(LOTS)) if (insideRect(x, z, r)) return 'road';
+    return 'grass';
+  }
+
   /** Is the point outside the drivable area (used for out-of-bounds recovery)? */
   isOutOfBounds(x, z) {
     const H = WORLD.halfSize - 1;

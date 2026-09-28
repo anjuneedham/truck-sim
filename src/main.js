@@ -43,6 +43,7 @@ class Game {
     this.initRenderer();
     this.world = new World(this.scene);
     this.phys = new TruckPhysics();
+    this.phys.surfaceAt = (x, z) => this.world.surfaceAt(x, z);
     this.model = new TruckModel();
     this.scene.add(this.model.root);
     this.cameraRig = new CameraRig(this.camera, this.world.collision);
@@ -71,6 +72,7 @@ class Game {
 
     this.input.bindTouchControls(document.body);
     this.input.bindLookArea(this.canvas);
+    this.input.bindSteeringWheel(document.getElementById('ctrl-wheel'));
 
     this.applySettings();
     this.resetTruck(SPAWN.x, SPAWN.z, SPAWN.heading);
@@ -101,7 +103,8 @@ class Game {
       this.renderer.setSize(w, h, false);
       this.camera.aspect = w / h;
       // Portrait screens get a wider FOV so the road stays visible.
-      this.camera.fov = w < h ? 75 : 60;
+      this.baseFov = w < h ? 75 : 60;
+      this.camera.fov = this.baseFov;
       this.camera.updateProjectionMatrix();
     };
     window.addEventListener('resize', onResize);
@@ -124,7 +127,26 @@ class Game {
     this.camera.far = q.fogFar + 40;
     this.camera.updateProjectionMatrix();
     this.audio.setEnabled(s.audio, s.sfx);
+    this.phys.steerSensitivity = s.steerSensitivity;
+    if (this.input.steerMode !== s.steeringMode) {
+      this.input.steerMode = s.steeringMode;
+      // Tilt needs a permission prompt on some browsers; this runs from the settings tap.
+      this.input.setTiltEnabled(s.steeringMode === 'tilt').then((ok) => {
+        if (!ok && s.steeringMode === 'tilt') this.ui?.toast('Tilt steering is not available on this device');
+      });
+    }
     this.ui?.syncSettings(s);
+  }
+
+  /** Short haptic pulse (Android browsers; silently ignored elsewhere). */
+  vibrate(ms) {
+    if (this.save.settings.vibration && navigator.vibrate) {
+      try {
+        navigator.vibrate(ms);
+      } catch {
+        /* not allowed in this context */
+      }
+    }
   }
 
   setSetting(key, value) {
@@ -271,12 +293,19 @@ class Game {
         this.ui.toast(this.phys.gear === 'R' ? 'Reverse' : 'Drive', 700);
       } else {
         this.ui.toast('Stop the truck to change gear');
+        this.vibrate(40);
       }
     }
-    if (inp.consumeAction('camera')) {
+    while (inp.consumeAction('camera')) {
       const p = this.cameraRig.cyclePreset();
       this.save.setSetting('cameraPreset', p);
       this.audio.playClick();
+      this.ui.toast(`Camera: ${this.cameraRig.preset.name}`, 800);
+    }
+    if (inp.consumeAction('recenter')) {
+      this.input.recalibrateTilt();
+      this.audio.playClick();
+      this.ui.toast('Tilt centred', 800);
     }
     if (inp.consumeAction('reset')) {
       this.audio.playClick();
@@ -297,14 +326,24 @@ class Game {
   }
 
   stepDriving(dt) {
+    this.input.updateWheel(dt);
     const input = this.input.read();
+    // Sensitivity also scales how far tilt has to go for full lock.
+    if (this.input.steerMode === 'tilt' && input.steer !== 0) {
+      input.steer = Math.max(-1, Math.min(1, input.steer * this.phys.steerSensitivity));
+    }
     this.accumulator = Math.min(this.accumulator + dt, PHYSICS_DT * 5);
     let impact = 0;
+    let shifted = false;
+    let scraping = 0;
     while (this.accumulator >= PHYSICS_DT) {
       this.phys.step(input, PHYSICS_DT, this.world.collision);
       impact = Math.max(impact, this.phys.lastImpact);
+      scraping = Math.max(scraping, this.phys.scraping);
+      shifted = shifted || this.phys.shiftedThisStep;
       this.accumulator -= PHYSICS_DT;
     }
+    if (shifted) this.audio.playShift();
 
     if (impact > 0.5) {
       this.lastCollisionTime = this.time;
@@ -312,6 +351,7 @@ class Game {
         this.lastImpactSound = this.time;
         this.audio.playImpact(impact);
         this.cameraRig.addShake(Math.min(1, impact / 10));
+        this.vibrate(Math.min(200, 30 + impact * 12));
       }
     }
 
@@ -336,6 +376,8 @@ class Game {
         brake: input.brake,
         speed: Math.abs(this.phys.speed),
         reverse: this.phys.gear === 'R',
+        scraping,
+        offroad: this.phys.surface === 'grass',
       },
       dt
     );
@@ -357,11 +399,20 @@ class Game {
 
     if (this.state === 'driving') {
       this.stepDriving(dt);
+      this.cameraRig.applyZoom(this.input.takeZoom());
       this.cameraRig.update(this.phys, dt, this.input.takeLookDelta());
+      const fov = this.baseFov + this.cameraRig.fovOffset;
+      if (Math.abs(this.camera.fov - fov) > 0.05) {
+        this.camera.fov = fov;
+        this.camera.updateProjectionMatrix();
+      }
       const m = this.mission;
       this.ui.updateHUD({
         speedKmh: this.phys.speedKmh,
         gear: this.phys.gear,
+        gearLabel: this.phys.gearLabel,
+        rpm: this.phys.rpm,
+        tilt: this.input.steerMode === 'tilt' ? this.input.tiltSteer : undefined,
         condition: this.phys.condition,
         objective: `Deliver to ${m.job.destination}`,
         distance: m.distanceTo(this.phys),
@@ -373,6 +424,10 @@ class Game {
       this.minimap.draw(this.phys, m.job.zone);
     } else if (this.state === 'menu' || this.state === 'offer') {
       // Slow showcase orbit around the parked truck.
+      if (this.camera.fov !== this.baseFov) {
+        this.camera.fov = this.baseFov;
+        this.camera.updateProjectionMatrix();
+      }
       const a = this.time * 0.15;
       const p = this.phys;
       this.camera.position.set(p.x + Math.sin(a) * 18, 6, p.z + Math.cos(a) * 18);

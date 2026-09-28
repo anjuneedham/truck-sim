@@ -73,6 +73,21 @@ export class UI {
     $('set-audio').addEventListener('change', (e) => handlers.setSetting('audio', e.target.checked));
     $('set-sfx').addEventListener('change', (e) => handlers.setSetting('sfx', e.target.checked));
     $('set-fps').addEventListener('change', (e) => handlers.setSetting('showFps', e.target.checked));
+    $('set-steer-sens').addEventListener('input', (e) => {
+      handlers.setSetting('steerSensitivity', Number(e.target.value) / 100);
+    });
+    $('set-vibration').addEventListener('change', (e) => handlers.setSetting('vibration', e.target.checked));
+    const bindSegmented = (id, key) =>
+      $(id)
+        .querySelectorAll('button')
+        .forEach((b) =>
+          b.addEventListener('click', () => {
+            handlers.click();
+            handlers.setSetting(key, b.dataset.v);
+          })
+        );
+    bindSegmented('set-steer-mode', 'steeringMode');
+    bindSegmented('set-ctrl-size', 'controlSize');
     $('set-quality').querySelectorAll('button').forEach((b) =>
       b.addEventListener('click', () => {
         handlers.click();
@@ -115,6 +130,21 @@ export class UI {
       .querySelectorAll('button')
       .forEach((b) => b.classList.toggle('active', b.dataset.q === settings.quality));
     $('fps').classList.toggle('hidden', !settings.showFps);
+    const seg = (id, v) =>
+      $(id)
+        .querySelectorAll('button')
+        .forEach((b) => b.classList.toggle('active', b.dataset.v === v));
+    seg('set-steer-mode', settings.steeringMode);
+    seg('set-ctrl-size', settings.controlSize);
+    $('set-steer-sens').value = Math.round(settings.steerSensitivity * 100);
+    $('set-steer-sens-val').textContent = Math.round(settings.steerSensitivity * 100) + '%';
+    $('set-vibration').checked = settings.vibration;
+    // Steering control layout
+    $('steer-buttons').classList.toggle('hidden', settings.steeringMode !== 'buttons');
+    $('steer-wheel').classList.toggle('hidden', settings.steeringMode !== 'wheel');
+    $('steer-tilt').classList.toggle('hidden', settings.steeringMode !== 'tilt');
+    const scale = { small: 0.8, medium: 1, large: 1.2 }[settings.controlSize] || 1;
+    document.documentElement.style.setProperty('--ctrl-scale', scale);
   }
 
   updateMenuStats(save) {
@@ -154,9 +184,13 @@ export class UI {
     }
   }
 
-  updateHUD({ speedKmh, gear, condition, objective, distance, bearing, money, unload, inZone }) {
+  updateHUD({ speedKmh, gear, gearLabel, rpm, tilt, condition, objective, distance, bearing, money, unload, inZone }) {
     this.setText('hud-speed', String(Math.round(speedKmh)));
-    this.setText('hud-gear', gear);
+    this.setText('hud-gear', gearLabel ?? gear);
+    const rpmEl = $('hud-rpm');
+    rpmEl.style.width = Math.round(rpm * 100) + '%';
+    rpmEl.style.background = rpm > 0.88 ? 'var(--bad)' : rpm > 0.7 ? 'var(--accent)' : 'var(--good)';
+    if (tilt !== undefined) $('tilt-indicator').style.left = `calc(${50 + tilt * 50}% - 4px)`;
     this.setText('hud-objective', objective);
     this.setText('hud-distance', inZone ? 'Stop inside the marker' : formatDistance(distance));
     this.setText('hud-money', formatMoney(money));
