@@ -79,7 +79,7 @@ export const SUSPENSION = {
 export const CAMERA = {
   // Presets cycled with the camera button. 'hood' sits on the cab looking ahead.
   presets: [
-    { name: 'Chase', distance: 15, height: 6.5, lookHeight: 2.0, lookAhead: 7 },
+    { name: 'Chase', distance: 15, height: 6.8, lookHeight: 1.2, lookAhead: 8 },
     { name: 'Far', distance: 22, height: 9.5, lookHeight: 1.5, lookAhead: 9 },
     { name: 'Close', distance: 10, height: 4.5, lookHeight: 2.4, lookAhead: 5 },
     { name: 'Cab', hood: true, height: 3.3, forward: 3.2, lookAhead: 30, lookHeight: 2.2 },
@@ -112,7 +112,7 @@ export const WORLD = {
 
 // Graphics presets selected in Settings.
 export const QUALITY = {
-  low: { pixelRatio: 0.75, shadows: false, fogFar: 260, antialias: false },
-  medium: { pixelRatio: 1.0, shadows: false, fogFar: 380, antialias: false },
-  high: { pixelRatio: 2.0, shadows: true, fogFar: 520, antialias: true },
+  low: { pixelRatio: 0.8, shadows: false, shadowMap: 0, fogFar: 320 },
+  medium: { pixelRatio: 1.25, shadows: true, shadowMap: 1024, fogFar: 450 },
+  high: { pixelRatio: 2.0, shadows: true, shadowMap: 2048, fogFar: 600 },
 };

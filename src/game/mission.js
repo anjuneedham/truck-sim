@@ -175,7 +175,10 @@ export class Mission {
       m.userData.beacon.scale.x = m.userData.beacon.scale.z = 1 + Math.sin(time * 3) * 0.08;
     }
     if (this.trailerBeacon) {
-      this.trailerBeacon.visible = this.stage === 'couple';
+      // Beacon guides you to the trailer from afar; it hides up close so it
+      // doesn't block the view while reversing under the kingpin.
+      const near = Math.hypot(phys.x - this.trailer.cx, phys.z - this.trailer.cz) < 22;
+      this.trailerBeacon.visible = this.stage === 'couple' && !near;
       this.trailerBeacon.position.set(this.trailer.cx, 0, this.trailer.cz);
     }
     if (this.pickupMarker) this.pickupMarker.visible = this.stage === 'load';

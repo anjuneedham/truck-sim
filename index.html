@@ -130,13 +130,15 @@
         <button class="icon-btn" id="btn-pause" data-action="pause" aria-label="Pause">&#10074;&#10074;</button>
       </div>
       <canvas id="minimap" width="150" height="150"></canvas>
-      <div class="hud-speedo">
-        <div class="gear" id="hud-gear">D</div>
-        <div class="speed-block">
+      <div class="hud-speedo cluster">
+        <canvas id="dial-tacho" class="dial" aria-hidden="true"></canvas>
+        <div class="cluster-center">
+          <div class="shift-leds"><div id="hud-rpm"></div></div>
+          <div class="gear" id="hud-gear">D</div>
           <div class="speed"><span id="hud-speed">0</span><small>km/h</small></div>
-          <div class="tacho"><div id="hud-rpm"></div></div>
+          <div class="condition"><div class="bar"><div id="hud-condition-bar"></div></div><small id="hud-condition">Condition 100%</small></div>
         </div>
-        <div class="condition"><div class="bar"><div id="hud-condition-bar"></div></div><small id="hud-condition">Condition 100%</small></div>
+        <canvas id="dial-speedo" class="dial" aria-hidden="true"></canvas>
       </div>
       <div class="unload hidden" id="hud-unload"><div>Unloading&hellip;</div><div class="bar"><div id="hud-unload-bar"></div></div></div>
       <div id="hud-hint" class="hud-hint hidden"></div>

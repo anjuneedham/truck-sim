@@ -943,3 +943,59 @@ input[type='range'] {
   border-radius: 3px;
   flex: none;
 }
+
+/* ---------- Instrument cluster ---------- */
+.cluster {
+  --dial: clamp(76px, 21vh, 112px);
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(28, 33, 40, 0.92), rgba(12, 14, 18, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.dial {
+  width: var(--dial);
+  height: var(--dial);
+  display: block;
+}
+.cluster-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 92px;
+}
+.cluster .gear {
+  width: 40px;
+  height: 30px;
+  font-size: 20px;
+}
+.cluster .speed {
+  min-width: 0;
+  text-align: center;
+  font-size: 26px;
+  line-height: 1;
+}
+.cluster .condition {
+  min-width: 88px;
+  align-items: center;
+}
+.shift-leds {
+  width: 88px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.shift-leds #hud-rpm {
+  height: 100%;
+}
+@media (max-height: 420px) {
+  .cluster .speed {
+    font-size: 20px;
+  }
+  .cluster .condition small {
+    display: none;
+  }
+}

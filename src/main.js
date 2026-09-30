@@ -13,6 +13,9 @@ import { SaveSystem } from './core/save.js';
 import { Input } from './core/input.js';
 import { AudioSystem } from './core/audio.js';
 import { World } from './game/world.js';
+import { Environment } from './render/environment.js';
+import { Effects } from './render/effects.js';
+import { setAnisotropy } from './render/textures.js';
 import { TruckPhysics } from './game/truckPhysics.js';
 import { TruckModel } from './game/truckModel.js';
 import { CameraRig } from './game/cameraRig.js';
@@ -30,7 +33,6 @@ import { TRUCK_CATALOGUE, getTruck, buildSpec, truckStats, plateFor } from './da
 import { Minimap } from './ui/minimap.js';
 
 const PHYSICS_DT = 1 / 60;
-const SKY = 0xa9cde8;
 
 class Game {
   constructor() {
@@ -47,6 +49,10 @@ class Game {
     this.lastCollisionTime = -10;
     this.brakeHoldTime = 0;
     this.reverseHintShown = false;
+    // Safety limits for slow frames (avoid a physics "spiral of death" on weak
+    // devices). Automated tests raise them so simulation stays real-time.
+    this.maxPhysicsSteps = 5;
+    this.maxFrameDt = 0.1;
 
     this.initRenderer();
     this.world = new World(this.scene);
@@ -59,6 +65,7 @@ class Game {
     this.cameraRig = new CameraRig(this.camera, this.world.collision);
     this.cameraRig.setPreset(this.save.settings.cameraPreset || 0);
     this.minimap = new Minimap(document.getElementById('minimap'));
+    this.effects = new Effects(this.scene);
 
     this.ui = new UI({
       click: () => {
@@ -106,11 +113,11 @@ class Game {
   // ---------------------------------------------------------------- setup
   initRenderer() {
     this.canvas = document.getElementById('game-canvas');
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, powerPreference: 'high-performance' });
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(SKY);
-    this.scene.fog = new THREE.Fog(SKY, 80, 380);
+    // Sky, sun, reflections, fog and tone mapping.
+    this.env = new Environment(this.renderer, this.scene);
+    setAnisotropy(Math.min(8, this.renderer.capabilities.getMaxAnisotropy()));
     this.camera = new THREE.PerspectiveCamera(60, 1, 1.0, 600);
     const onResize = () => {
       const w = window.innerWidth;
@@ -136,9 +143,9 @@ class Game {
         if (o.material) o.material.needsUpdate = true;
       });
     }
-    this.world.setShadows(q.shadows);
+    this.env.setShadows(q.shadows, q.shadowMap);
     this.model?.setShadowMode(q.shadows);
-    this.scene.fog.far = q.fogFar;
+    this.env.setFogFar(q.fogFar);
     this.camera.far = q.fogFar + 40;
     this.camera.updateProjectionMatrix();
     this.audio.setEnabled(s.audio, s.sfx);
@@ -265,7 +272,7 @@ class Game {
     t.place(spot.x, spot.z, spot.heading);
     this.world.collision.addDynamic(t.parkedBox);
     this.trailer = t;
-    this.trailerModel = new TrailerModel(type);
+    this.trailerModel = new TrailerModel(type, job.cargo || null);
     this.trailerModel.setShadowMode(this.renderer.shadowMap.enabled);
     this.trailerModel.update(t, 0, false, 0);
     this.scene.add(this.trailerModel.root);
@@ -592,7 +599,7 @@ class Game {
     if (this.input.steerMode === 'tilt' && input.steer !== 0) {
       input.steer = Math.max(-1, Math.min(1, input.steer * this.phys.steerSensitivity));
     }
-    this.accumulator = Math.min(this.accumulator + dt, PHYSICS_DT * 5);
+    this.accumulator = Math.min(this.accumulator + dt, PHYSICS_DT * this.maxPhysicsSteps);
     let impact = 0;
     let shifted = false;
     let scraping = 0;
@@ -604,6 +611,7 @@ class Game {
       this.accumulator -= PHYSICS_DT;
     }
     if (shifted) this.audio.playShift();
+    this.effects.update(dt, { truckModel: this.model, phys: this.phys, throttle: input.throttle, shifted });
 
     if (impact > 0.5) {
       this.lastCollisionTime = this.time;
@@ -656,9 +664,10 @@ class Game {
 
   frame() {
     const now = performance.now();
-    const dt = Math.min(0.1, (now - this.lastFrame) / 1000);
+    const dt = Math.min(this.maxFrameDt, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
     this.time += dt;
+    this.frameCount = (this.frameCount || 0) + 1;
 
     this.handleActions();
 
@@ -671,12 +680,14 @@ class Game {
         this.camera.fov = fov;
         this.camera.updateProjectionMatrix();
       }
+      this.effects.setViewport(this.renderer.domElement.height, this.camera.fov);
       const m = this.mission;
       this.ui.updateHUD({
         speedKmh: this.phys.speedKmh,
         gear: this.phys.gear,
         gearLabel: this.phys.gearLabel,
         rpm: this.phys.rpm,
+        engineRpm: this.phys.engineRpm,
         tilt: this.input.steerMode === 'tilt' ? this.input.tiltSteer : undefined,
         condition: this.phys.condition,
         objective: m.objective,
@@ -689,6 +700,7 @@ class Game {
       this.minimap.draw(this.phys, m.target(), this.trailer);
       this.updateTrailerHUD();
     } else if (this.state === 'menu' || this.state === 'jobs' || this.state === 'garage') {
+      this.effects.update(dt, { truckModel: this.model, phys: this.phys, throttle: 0, shifted: false });
       // Slow showcase orbit around the parked truck.
       if (this.camera.fov !== this.baseFov) {
         this.camera.fov = this.baseFov;
@@ -711,7 +723,8 @@ class Game {
       this.mission.update(this.phys, 0, this.time);
     }
 
-    this.world.followSun(this.phys.x, this.phys.z);
+    this.world.update(dt, this.time);
+    this.env.update(this.camera, this.phys.x, this.phys.z);
     this.renderer.render(this.scene, this.camera);
 
     // FPS counter
@@ -728,3 +741,4 @@ class Game {
 
 // Exposed for debugging and the automated smoke test.
 window.__game = new Game();
+window.__trucks = TRUCK_CATALOGUE;

@@ -114,6 +114,36 @@ Current feel: 0 to 60 km/h in about 13 s with five audible gear changes, a
 governed top speed of 90 km/h, a 60 to 0 km/h stop in about 23 m, and a
 turning radius of about 8.4 m at low speed.
 
+## Graphics
+
+Everything is generated in code, so there are no model or texture downloads.
+
+- **Lighting:** a physically based atmospheric sky baked into an environment
+  map, so paint, chrome and glass reflect the sky. ACES filmic tone mapping,
+  a warm sun with shadows that follow the truck, and horizon-coloured haze.
+- **Textures** (`src/render/textures.js`): asphalt with tyre-wear lanes and
+  a normal map, worn road paint, grass, concrete slabs, gravel shoulders,
+  office, brick and plaster facades, corrugated cladding, loading-dock doors,
+  branded trailer sides, container steel, wood decks and signs.
+- **Trucks** (`src/game/truckModel.js`): detailed cabs (cabover, long hood,
+  aero), grilles, mirrors, visors, marker lights, fuel tanks, stacks, fifth
+  wheel, air lines, and dual wheels with rims and lug nuts. Parts are merged
+  per material, so a truck costs about 15 draw calls.
+- **Trailers** (`src/game/trailerModel.js`): ribbed vans with rear doors and
+  reflective tape, a reefer unit, a flatbed whose load matches the cargo
+  (I-beams, lumber or a machine), a polished tanker with a walkway, and a
+  container chassis.
+- **World** (`src/game/world.js`, `src/game/worldProps.js`): shoulders,
+  stop lines, crossings, animated traffic lights, street lights, W-beam
+  guardrails, jersey barriers, facility buildings with signs, a tower crane,
+  wind turbines, forested hills, parked cars and stacked containers.
+- **Effects** (`src/render/effects.js`): diesel exhaust (heavier under load
+  and on gear changes) and dust on grass, all in one particle draw call.
+- **HUD:** an analog instrument cluster (rev counter and speedometer).
+
+`node tests/visual.mjs [low|medium|high]` renders review shots of every truck,
+every trailer and the world into `test-results/visual/`.
+
 ## Performance notes
 
 - No physics engine: the world is flat, so collisions are 2D oriented boxes
@@ -121,6 +151,7 @@ turning radius of about 8.4 m at low speed.
 - Static scenery is merged into a few meshes or drawn as `InstancedMesh`
   (about 25 draw calls for the whole map).
 - No textures or model files. All audio is synthesized at runtime.
-- Graphics: **Low** (0.75x resolution), **Medium** (1x, the default),
-  **High** (up to 2x resolution plus real-time shadows). Low and Medium use a
-  cheap blob shadow under the truck.
+- Graphics presets:
+  - **Low:** 0.8x resolution, no shadow maps (the truck uses a blob shadow), about 110 draw calls.
+  - **Medium** (the default): 1.25x resolution, 1024 px shadows.
+  - **High:** up to 2x resolution, 2048 px shadows.

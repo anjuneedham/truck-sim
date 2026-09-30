@@ -1,6 +1,8 @@
 // DOM-based UI: screens, HUD updates, settings panel and toasts.
 // The game calls into this; UI raises events back through the `handlers` object.
 
+import { Dashboard } from './dashboard.js';
+
 const $ = (id) => document.getElementById(id);
 
 const SCREENS = ['screen-menu', 'screen-garage', 'screen-settings', 'screen-jobs', 'screen-pause', 'screen-complete', 'screen-failed'];
@@ -284,7 +286,13 @@ export class UI {
     }
   }
 
-  updateHUD({ speedKmh, gear, gearLabel, rpm, tilt, condition, objective, distance, bearing, money, unload, inZone }) {
+  updateHUD({ speedKmh, gear, gearLabel, rpm, engineRpm, tilt, condition, objective, distance, bearing, money, unload, inZone }) {
+    // Dials are sized by CSS; (re)build once they are visible.
+    const tc = $('dial-tacho');
+    if (tc.clientWidth && (!this.dashboard || this.dashboard.tacho.size !== tc.clientWidth)) {
+      this.dashboard = new Dashboard(tc, $('dial-speedo'));
+    }
+    this.dashboard?.update(engineRpm ?? 0, speedKmh);
     this.setText('hud-speed', String(Math.round(speedKmh)));
     this.setText('hud-gear', gearLabel ?? gear);
     const rpmEl = $('hud-rpm');

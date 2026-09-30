@@ -75,7 +75,7 @@ export const TRAILER_TYPES = {
     kingpinToAxle: 7.2,
     emptyMass: 2600,
     drag: 1.1,
-    color: 0x8a2d2d, // container colour
+    color: 0xb4402f, // container colour
     accent: 0x2f3338,
   },
 };

@@ -35,6 +35,18 @@ page.on('console', (m) => {
 });
 
 const wait = (ms) => page.waitForTimeout(ms);
+// The software renderer used in CI is slow; let physics catch up every frame so
+// simulated time matches wall-clock time (the game caps this on real devices).
+/** Wait until the game has rendered `n` more frames (robust at any frame rate). */
+async function frames(n = 3) {
+  const start = await page.evaluate(() => window.__game.frameCount || 0);
+  await page.waitForFunction((t) => (window.__game.frameCount || 0) >= t, start + n, { timeout: 20000 });
+}
+const realtime = () =>
+  page.evaluate(() => {
+    window.__game.maxPhysicsSteps = 20;
+    window.__game.maxFrameDt = 0.33;
+  });
 const g = (expr) => page.evaluate(`(() => { const game = window.__game; return ${expr}; })()`);
 const visible = (sel) => page.locator(sel).isVisible();
 const shot = (name) => page.screenshot({ path: `${outDir}${name}.png` });
@@ -49,7 +61,7 @@ async function waitStopped(timeout = 8000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     if (Math.abs(await g('game.phys.speed')) < 0.01) return true;
-    await wait(100);
+    await frames(3);
   }
   return false;
 }
@@ -57,6 +69,7 @@ async function waitStopped(timeout = 8000) {
 try {
   await page.goto(pageUrl);
   await page.waitForFunction(() => window.__game && window.__game.fps > 0, null, { timeout: 20000 });
+  await realtime();
 
   // ---- Launch / menu
   check('Game launches (no startup errors)', errors.length === 0, errors.join(' | '));
@@ -70,7 +83,7 @@ try {
   await page.click('#set-quality button[data-q="low"]');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('truckSim.save.v1')));
   check('Settings saved to storage', saved.settings.sfx === false && saved.settings.quality === 'low');
-  check('Graphics quality applied', (await g('game.renderer.getPixelRatio()')) === 0.75);
+  check('Graphics quality applied', (await g('game.renderer.getPixelRatio()')) === 0.8 && (await g('game.renderer.shadowMap.enabled')) === false);
   await shot('02-settings');
   await page.click('#btn-settings-back');
   check('Settings back returns to menu', await visible('#screen-menu'));
@@ -78,10 +91,13 @@ try {
   // Reload -> settings persisted
   await page.reload();
   await page.waitForFunction(() => window.__game && window.__game.fps > 0);
+  await realtime();
   check('Settings persist after reload', !(await page.isChecked('#set-sfx')) && (await g('game.save.settings.quality')) === 'low');
   await page.evaluate(() => {
     window.__game.setSetting('sfx', true);
-    window.__game.setSetting('quality', 'medium');
+    // Gameplay checks run at Low quality so the software renderer stays fast;
+    // tests/visual.mjs covers the High-quality look.
+    window.__game.setSetting('quality', 'low');
   });
 
   // ---- Play -> job market -> drive
@@ -105,13 +121,13 @@ try {
   const acc = await g('({c: game.mission.cargo.name, f: game.mission.from.name, t: game.mission.to.name})');
   check('Accepted job matches the selected card', acc.c === pickedCargo && pickedRoute.startsWith(`${acc.f} → ${acc.t}`), `${acc.c} ${acc.f}→${acc.t}`);
   // Use a known job from here on (depot -> warehouse, loaded at the depot).
-  await page.evaluate(() => {
+  const firstStage = await page.evaluate(() => {
     const g = window.__game;
     g.parkAtLocation();
     g.startJob(g.createJob('canned', 'depot', 'warehouse'));
+    return { stage: g.mission.stage, objective: g.mission.objective };
   });
-  await wait(200);
-  check('Rigid truck job starts with a loading stage', (await g('game.mission.stage')) === 'load' && (await page.textContent('#hud-objective')).startsWith('Load'));
+  check('Rigid truck job starts with a loading stage', firstStage.stage === 'load' && firstStage.objective.startsWith('Load'), firstStage.objective);
   const spawn = await g('({x: game.phys.x, z: game.phys.z, h: game.phys.heading})');
   check('Truck spawns at depot', Math.abs(spawn.x - -110) < 0.1 && Math.abs(spawn.z - 152) < 0.1);
 
@@ -169,7 +185,7 @@ try {
   await g('(game.resetTruck(-60, 200, Math.PI / 2), true)');
   await holdKeys(['ArrowUp'], 1200);
   await page.keyboard.press('KeyR');
-  await wait(100);
+  await frames(3);
   check('Cannot shift to reverse while moving', (await g('game.phys.gear')) === 'D');
   await page.keyboard.down('ArrowDown');
   await waitStopped();
@@ -177,7 +193,7 @@ try {
   const gearBtn = await page.locator('#ctrl-gear').boundingBox();
   await touch('touchStart', [{ x: gearBtn.x + 20, y: gearBtn.y + 20, id: 3 }]);
   await touch('touchEnd', []);
-  await wait(100);
+  await frames(3);
   check('Gear button switches to Reverse', (await g('game.phys.gear')) === 'R' && (await page.textContent('#hud-gear')) === 'R');
   const beforeRev = await g('({x: game.phys.x, z: game.phys.z, h: game.phys.heading})');
   await holdKeys(['ArrowUp'], 1500);
@@ -190,7 +206,7 @@ try {
   await waitStopped();
   await page.keyboard.up('ArrowDown');
   await page.keyboard.press('KeyR');
-  await wait(50);
+  await frames(3);
   check('Shift back to Drive', (await g('game.phys.gear')) === 'D');
 
   // ---- Camera
@@ -211,7 +227,7 @@ try {
   check('Cab camera preset sits on the cab', cab.p === 'Cab' && cabFwd > 1 && cab.cy > 2.5 && cab.cy < 4, `fwd=${cabFwd.toFixed(1)}`);
   await shot('05b-cab-view');
   await page.keyboard.press('KeyC');
-  await wait(300);
+  await frames(3);
   check('Camera cycles back to chase', (await g('game.cameraRig.presetIndex')) === 0);
 
   // ---- Phase 1: driving polish
@@ -231,15 +247,20 @@ try {
   check('Suspension pitches under braking', pitch > 0.005, `pitch=${pitch.toFixed(3)} rad`);
   check('Gearbox downshifts back to 1st when stopped', (await g('game.phys.gearIndex')) === 0);
 
-  // Surface: grass is slower than tarmac for the same throttle time.
-  await g('(game.resetTruck(-120, 200, Math.PI / 2), true)');
-  await holdKeys(['ArrowUp'], 2500);
-  const roadV = await g('game.phys.speed');
-  await g('(game.resetTruck(-40, 120, Math.PI / 2), true)');
-  check('Surface detection finds grass off-road', (await g('game.world.surfaceAt(-40, 120)')) === 'grass');
-  await holdKeys(['ArrowUp'], 2500);
-  const grassV = await g('game.phys.speed');
-  check('Grass slows the truck', grassV < roadV * 0.9, `road ${roadV.toFixed(1)} vs grass ${grassV.toFixed(1)} m/s`);
+  // Surface: grass is slower than tarmac for the same throttle time (deterministic sim).
+  check('Surface detection finds grass off-road', (await g('game.world.surfaceAt(-40, 120)')) === 'grass' && (await g('game.world.surfaceAt(-60, 200)')) === 'road');
+  const surf = await g(`(() => {
+    const run = (surface) => {
+      const p = new game.phys.constructor(game.phys.spec);
+      p.surfaceAt = () => surface;
+      for (let i = 0; i < 150; i++) p.step({ steer: 0, throttle: 1, brake: 0 }, 1 / 60, null);
+      return p.speed;
+    };
+    return { road: run('road'), grass: run('grass') };
+  })()`);
+  const roadV = surf.road;
+  const grassV = surf.grass;
+  check('Grass slows the truck', grassV < roadV * 0.9, `road ${roadV.toFixed(1)} vs grass ${grassV.toFixed(1)} m/s after 2.5 s`);
 
   // High-speed guardrail hit must not tunnel through the thin rail.
   // North ring road at z=200, rail at z=211. Aim at it at 25 m/s, 30 deg.
@@ -268,7 +289,7 @@ try {
     const rad = (a * Math.PI) / 180;
     await touch('touchMove', [{ x: wcx + Math.sin(rad) * R, y: wcy - Math.cos(rad) * R, id: 5 }]);
   }
-  await wait(50);
+  await frames(3);
   const wheelIn = await g('game.input.read().steer');
   await touch('touchStart', [{ x: wcx + R, y: wcy, id: 5 }, pGas]);
   await wait(900);
@@ -284,7 +305,7 @@ try {
 
   // Tilt mode: synthetic device orientation (phone held in landscape).
   await page.evaluate(() => window.__game.setSetting('steeringMode', 'tilt'));
-  await wait(100);
+  await frames(3);
   check('Tilt mode shows re-centre control', await visible('#steer-tilt'));
   const tiltEvent = (beta) =>
     page.evaluate((b) => window.dispatchEvent(Object.assign(new Event('deviceorientation'), { alpha: 0, beta: b, gamma: b })), beta);
@@ -309,12 +330,12 @@ try {
   await touch('touchStart', [{ x: 400, y: 200, id: 7 }, { x: 440, y: 200, id: 8 }]);
   await touch('touchMove', [{ x: 360, y: 200, id: 7 }, { x: 480, y: 200, id: 8 }]);
   await touch('touchEnd', []);
-  await wait(100);
+  await frames(3);
   const z1 = await g('game.cameraRig.zoom');
   check('Pinch out zooms the camera in', z1 < z0 * 0.8, `${z0.toFixed(2)} -> ${z1.toFixed(2)}`);
   await page.mouse.move(450, 150);
   await page.mouse.wheel(0, 600);
-  await wait(100);
+  await frames(3);
   check('Mouse wheel zooms out', (await g('game.cameraRig.zoom')) > z1, `${(await g('game.cameraRig.zoom')).toFixed(2)}`);
   await g('(game.cameraRig.zoom = 1, true)');
 
@@ -335,18 +356,18 @@ try {
   // ---- Recover / reset
   await g('(game.safeSpot = {x: -60, z: 200, heading: Math.PI / 2}, true)');
   await page.keyboard.press('KeyT');
-  await wait(100);
+  await frames(3);
   const rec = await g('({x: game.phys.x, z: game.phys.z, v: game.phys.speed})');
   check('Reset recovers truck to safe spot', Math.abs(rec.x - -60) < 0.5 && Math.abs(rec.z - 200) < 0.5 && rec.v === 0);
 
   // ---- Out of bounds
   await g('(game.phys.x = 500, true)');
-  await wait(200);
+  await frames(3);
   check('Out-of-bounds auto-recovers', Math.abs(await g('game.phys.x')) < 330);
 
   // ---- Pause / resume via on-screen button
   await page.click('#btn-pause');
-  await wait(100);
+  await frames(3);
   check('Pause button pauses', (await g('game.state')) === 'paused' && (await visible('#screen-pause')));
   await page.click('#btn-resume');
   check('Resume works', (await g('game.state')) === 'driving');
@@ -362,11 +383,14 @@ try {
   check('Stopping in the loading zone loads the cargo', (await g('game.mission.loaded')) && (await page.textContent('#hud-objective')).startsWith('Deliver'));
   const dist0 = await g('game.mission.distanceTo(game.phys)');
   await g(`(game.resetTruck(${dropZone.x}, ${dropZone.z}, 0), true)`);
-  await wait(300);
+  await frames(3);
   const hudDistText = await page.textContent('#hud-distance');
   check('HUD distance updates / in-zone prompt', hudDistText === 'Stop inside the marker', `before=${dist0.toFixed(0)}m`);
-  await wait(400);
-  check('Unloading progress shows', await visible('#hud-unload'));
+  const sawUnload = await page
+    .waitForFunction(() => !document.getElementById('hud-unload').classList.contains('hidden'), null, { timeout: 4000, polling: 'raf' })
+    .then(() => true)
+    .catch(() => false);
+  check('Unloading progress shows', sawUnload);
   await page.waitForFunction(() => window.__game.state === 'complete', null, { timeout: 5000 });
   check('Delivery completes when stopped in zone', (await g('game.state')) === 'complete' && (await visible('#screen-complete')));
   const money1 = await g('game.save.data.money');
@@ -390,23 +414,23 @@ try {
   check('Truck starts the next job where it delivered', Math.hypot(startPose.x - dropZone.x, startPose.z - dropZone.z) < 1);
   await holdKeys(['ArrowUp'], 800);
   await page.keyboard.press('Escape');
-  await wait(100);
+  await frames(3);
   await page.click('#btn-restart');
-  await wait(100);
+  await frames(3);
   const rs = await g('({s: game.state, x: game.phys.x, z: game.phys.z, v: game.phys.speed})');
   check('Restart delivery resets truck to the job start', rs.s === 'driving' && Math.hypot(rs.x - startPose.x, rs.z - startPose.z) < 0.1 && rs.v === 0);
 
   // ---- Failure path (cargo destroyed) + fee
   const moneyBeforeFail = await g('game.save.data.money');
   await g('(game.phys.condition = 0, true)');
-  await wait(200);
+  await frames(3);
   check('Mission fails when condition reaches 0', (await g('game.state')) === 'failed' && (await visible('#screen-failed')));
   check('Failed delivery charges a fee and is counted', (await g('game.save.data.money')) < moneyBeforeFail && (await g('game.save.data.stats.failed')) === 1);
   await page.click('#btn-retry');
   check('Retry after failure', (await g('game.state')) === 'driving' && (await g('game.phys.condition')) === 100);
   // Abandon from the pause menu.
   await page.keyboard.press('Escape');
-  await wait(100);
+  await frames(3);
   await page.click('#btn-abandon');
   check('Abandoning a job fails it', (await visible('#screen-failed')) && (await page.textContent('#fail-reason')).includes('abandoned'));
   await page.click('#btn-retry');
@@ -418,6 +442,7 @@ try {
   check('Return to main menu', await visible('#screen-menu'));
   await page.reload();
   await page.waitForFunction(() => window.__game && window.__game.fps > 0);
+  await realtime();
   const menuMoney = await page.textContent('#menu-money');
   check('Progress loads after reload', menuMoney === '$' + moneyNow.toLocaleString('en-US'), menuMoney);
   const home = await g('({loc: game.save.data.location, x: game.phys.x, z: game.phys.z})');
@@ -432,7 +457,7 @@ try {
     const info = await g('({id: game.model.entry.id, body: game.model.entry.body, len: game.phys.spec.length, mass: game.phys.spec.mass})');
     const statRows = await page.locator('#garage-stats dt').count();
     seen.push(info);
-    await wait(250);
+    await frames(3);
     await shot(`10-garage-${i}-${info.id}`);
     if (statRows !== 6) check(`Garage shows 6 stats for ${info.id}`, false, `${statRows}`);
     await page.click('#btn-garage-next');
@@ -460,7 +485,7 @@ try {
   });
   for (const type of ['box', 'reefer', 'flatbed', 'tanker', 'container']) {
     await page.evaluate((t) => window.__game.spawnTrailer({ trailer: t, cargoMass: 0 }), type);
-    await wait(300);
+    await frames(3);
     await page.evaluate(() => {
       const g = window.__game;
       g.state = 'debug-shot';
@@ -468,7 +493,7 @@ try {
       g.camera.position.set(g.phys.x + 14, 7, g.phys.z - 4);
       g.camera.lookAt(g.phys.x, 1.5, g.phys.z - 9);
     });
-    await wait(200);
+    await frames(3);
     await shot(`11-trailer-${type}`);
     await page.evaluate(() => {
       window.__game.state = 'menu';
@@ -490,11 +515,11 @@ try {
   });
   const tr0 = await g('({attached: game.trailer.attached, stage: game.mission.stage})');
   check('Trailer spawns parked behind the tractor', tr0.attached === false && tr0.stage === 'couple');
-  await wait(200);
+  await frames(3);
   check('Objective asks to couple the trailer', (await page.textContent('#hud-objective')).startsWith('Couple'));
   check('HITCH button hidden when not lined up', !(await visible('#ctrl-hitch')));
   await page.keyboard.press('KeyH');
-  await wait(100);
+  await frames(3);
   check('Coupling refused when not under the kingpin', (await g('game.trailer.attached')) === false);
   await wait(400);
   check('Coupling guidance shown', (await page.textContent('#hud-hint')).startsWith('Reverse under the trailer'));
@@ -502,10 +527,10 @@ try {
   // Reverse straight back under the kingpin with the real controls.
   async function reverseUnderTrailer() {
     await page.keyboard.press('KeyR');
-    await wait(120);
+    await frames(3);
     await page.keyboard.down('ArrowUp');
     const t0 = Date.now();
-    while (Date.now() - t0 < 12000 && !(await g('game.canCouple()'))) await wait(50);
+    while (Date.now() - t0 < 12000 && !(await g('game.canCouple()'))) await frames(3);
     await page.keyboard.up('ArrowUp');
     await page.keyboard.down('Space');
     await waitStopped(4000);
@@ -514,17 +539,17 @@ try {
   }
   const lined = await reverseUnderTrailer();
   check('Reversing lines the fifth wheel up under the kingpin', lined);
-  await wait(200);
+  await frames(3);
   check('HITCH button appears when coupling is possible', (await visible('#ctrl-hitch')) && (await page.textContent('#ctrl-hitch')) === 'HITCH');
   await shot('12-ready-to-couple');
   const hb = await page.locator('#ctrl-hitch').boundingBox();
   await touch('touchStart', [{ x: hb.x + 10, y: hb.y + 10, id: 9 }]);
   await touch('touchEnd', []);
-  await wait(150);
+  await frames(3);
   check('HITCH button couples the trailer', (await g('game.trailer.attached')) === true && (await g('game.mission.stage')) === 'deliver');
   check('Rig mass includes trailer + cargo', (await g('game.phys.totalMass')) > (await g('game.phys.spec.mass')) + 6000);
   await page.keyboard.press('KeyR');
-  await wait(120);
+  await frames(3);
   await holdKeys(['ArrowUp'], 2500);
   const follow = await g('({d: Math.hypot(game.phys.hitchX - game.trailer.kx, game.phys.hitchZ - game.trailer.kz), v: game.phys.speed, art: game.phys.articulation})');
   check('Coupled trailer follows the fifth wheel', follow.d < 0.01 && follow.v > 1 && Math.abs(follow.art) < 0.05, `gap ${follow.d.toFixed(3)} m`);
@@ -533,7 +558,7 @@ try {
   await page.keyboard.up('Space');
   // Uncouple, drive away, come back and recouple.
   await page.keyboard.press('KeyH');
-  await wait(100);
+  await frames(3);
   check('Uncoupling leaves the trailer parked', (await g('game.trailer.attached')) === false && (await g('game.world.collision.dynamic.has(game.trailer.parkedBox)')));
   const parkedAt = await g('({x: game.trailer.kx, z: game.trailer.kz})');
   await holdKeys(['ArrowUp'], 1500);
@@ -544,16 +569,16 @@ try {
   check('Parked trailer stays put', Math.hypot(still.x - parkedAt.x, still.z - parkedAt.z) < 0.01);
   check('Recoupling works', await reverseUnderTrailer());
   await page.keyboard.press('KeyH');
-  await wait(100);
+  await frames(3);
   check('Trailer recoupled', await g('game.trailer.attached'));
   await page.keyboard.press('KeyR');
-  await wait(120);
+  await frames(3);
 
   // Jackknife: reverse with steering on the open ring road.
   await g('(game.resetTruck(-60, 200, Math.PI / 2), true)');
   await page.keyboard.press('KeyR');
-  await wait(120);
-  await wait(100);
+  await frames(3);
+  await frames(3);
   await holdKeys(['ArrowUp', 'ArrowRight'], 6000);
   const jk = await g('({art: game.phys.articulation, jk: game.trailer.jackknifed})');
   const hint = await page.textContent('#hud-hint');
@@ -564,7 +589,7 @@ try {
   await waitStopped();
   await page.keyboard.up('Space');
   await page.keyboard.press('KeyR');
-  await wait(120);
+  await frames(3);
   await holdKeys(['ArrowUp'], 4000);
   check('Driving forward straightens the rig', Math.abs(await g('game.phys.articulation')) < 0.35, `${((await g('game.phys.articulation')) * 57.3).toFixed(0)} deg`);
   await page.keyboard.down('Space');
@@ -574,14 +599,14 @@ try {
   // Trailer collision: swing the trailer into the north guardrail (z = 211).
   await g('(game.resetTruck(-60, 207, Math.PI / 2), game.phys.collisionCount = 0, true)');
   await page.keyboard.press('KeyR');
-  await wait(120);
+  await frames(3);
   await page.keyboard.down('ArrowUp');
   await page.keyboard.down('ArrowRight');
   let maxZ = 0;
   for (let i = 0; i < 40; i++) {
     const zc = await g(`(() => { const b = game.trailer.box; let m = -1e9; for (const sw of [-1, 1]) for (const sl of [-1, 1]) m = Math.max(m, b.z + b.ax[1] * b.halfW * sw + b.az[1] * b.halfL * sl); return m; })()`);
     maxZ = Math.max(maxZ, zc);
-    await wait(100);
+    await frames(3);
   }
   await page.keyboard.up('ArrowRight');
   await page.keyboard.up('ArrowUp');
@@ -592,12 +617,12 @@ try {
   await waitStopped();
   await page.keyboard.up('Space');
   await page.keyboard.press('KeyR');
-  await wait(120);
+  await frames(3);
 
   // ---- Full route drive with a loaded trailer: autopilot uses the player input interface.
   await page.keyboard.press('Escape');
   await page.click('#btn-restart');
-  await wait(100);
+  await frames(3);
   await page.evaluate(() => {
     const g = window.__game;
     // Couple straight away (coupling itself is tested above).
