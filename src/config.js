@@ -96,18 +96,13 @@ export const CAMERA = {
 };
 
 export const MISSION = {
-  stopSpeed: 1.0, // m/s: must be slower than this inside the zone
-  stopTime: 1.2, // seconds stationary in zone to unload
-  payPerKm: 900, // $ per km of route
-  basePay: 250,
-  timeBonusMax: 300,
-  parSpeedKmh: 35, // average speed that earns zero time bonus (rigid truck)
-  parSpeedTrailerKmh: 24, // same for semi-trailer jobs (coupling + wider turns)
-  trailerPayMultiplier: 1.35, // semi-trailer jobs pay more than rigid-truck jobs
+  stopSpeed: 1.0, // m/s: must be slower than this inside a zone
+  stopTime: 1.2, // seconds stationary on the drop pad to unload
+  loadTime: 2.0, // seconds stationary in the loading zone (rigid trucks)
   coupleDistance: 1.0, // m between fifth wheel and kingpin to allow coupling
   coupleAngle: 0.35, // rad max misalignment for coupling
   coupleSpeed: 1.5, // m/s max speed for coupling/uncoupling
-  trailerSpawnGap: 5.5, // m the parked trailer's kingpin sits behind the truck's fifth wheel
+  // (Pay, bonuses and penalties live in data/economy.js.)
 };
 
 export const WORLD = {

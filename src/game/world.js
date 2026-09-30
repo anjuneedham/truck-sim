@@ -9,8 +9,7 @@ import {
   ROADS,
   INTERSECTIONS,
   LOTS,
-  JOBS,
-  DEPOT_BUILDING,
+  FACILITIES,
   makeRng,
   distanceToRoad,
   insideRect,
@@ -223,7 +222,7 @@ export class World {
     }
     // Parking bay lines in the depot for visual reference.
     const d = LOTS.depot;
-    for (let x = d[0] + 8; x < d[2]; x += 8) {
+    for (let x = d[0] + 8; x < -100; x += 8) {
       if (Math.abs(x - -110) < 9) continue; // leave the spawn bay open
       lines.addSegment(x, d[1] + 2, x, d[1] + 16, 0.2, Y_MARK);
     }
@@ -249,7 +248,7 @@ export class World {
 
   buildBuildings() {
     const rng = makeRng(42);
-    const list = [DEPOT_BUILDING, ...JOBS.map((j) => j.building)];
+    const list = FACILITIES.map((f) => ({ ...f.building }));
     const palette = [0xc2b8a3, 0x9aa7b4, 0xb07d62, 0xd9d2c5, 0x7d8c7a, 0xa3a09a];
 
     // Scatter generic buildings in the blocks, avoiding roads and lots.

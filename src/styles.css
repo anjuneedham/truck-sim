@@ -188,6 +188,11 @@ h2.fail {
 .btn-primary:active {
   background: var(--accent-dark);
 }
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  transform: none;
+}
 .btn-ghost {
   background: transparent;
 }
@@ -847,4 +852,94 @@ input[type='range'] {
   .ctrl-hitch.ready {
     animation: none;
   }
+}
+
+/* ---------- Job market ---------- */
+.jobs-panel {
+  width: min(640px, 100%);
+}
+.jobs-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.jobs-location {
+  color: var(--muted);
+  font-size: 13px;
+}
+.job-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  overflow-y: auto;
+  max-height: calc(100vh - 170px);
+  max-height: calc(100dvh - 170px);
+  padding: 2px;
+}
+.job-card {
+  appearance: none;
+  text-align: left;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+  font: inherit;
+  touch-action: manipulation;
+}
+.job-card.selected {
+  border-color: var(--accent);
+  background: rgba(255, 182, 46, 0.1);
+}
+.job-card.locked {
+  opacity: 0.5;
+}
+.job-card:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.job-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.job-top strong {
+  font-size: 15px;
+  flex: 1;
+}
+.stars {
+  color: var(--accent);
+  letter-spacing: 1px;
+  font-size: 13px;
+}
+.job-route {
+  font-size: 13px;
+  color: var(--muted);
+}
+.job-bottom {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.job-bottom .money {
+  margin-left: auto;
+  font-size: 17px;
+  font-weight: 800;
+}
+.job-warn {
+  font-size: 12px;
+  color: var(--bad);
+  font-weight: 700;
+}
+.trailer-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
 }

@@ -56,15 +56,22 @@ with steering jackknifes the trailer; drive forward to straighten it.
 
 Truck data lives in `src/data/trucks.js`; trailer types live in `src/data/trailers.js`.
 
-## Gameplay loop
+## Gameplay loop (career)
 
-Main menu → **Play** → job offer (destination, cargo, distance, pay) →
-**Accept & Drive** → follow the green arrow, minimap and beacon → stop inside
-the green pad → unloading → **Delivery Complete** (pay, time bonus, damage
-penalty) → **Next delivery** or **Menu**. There are 3 destinations and they
-rotate. Money, completed deliveries and settings are saved in the browser.
+Main menu → **Play** → **Job Market** (6 jobs: cargo, route, distance, weight,
+reward, difficulty stars) → pick a job → **Accept job** → drive to the pickup
+(orange marker) → load the box truck, or couple the trailer → drive to the
+drop-off (green marker) → stop on the pad → **Delivery Complete** (pay, time
+bonus, damage penalty) → **Job market** at your new location.
 
-The mission fails only if the truck's condition reaches 0% from crashes.
+- Four facilities (depot, warehouse, construction site, market) each produce and accept different cargo.
+- The truck stays where it delivered, and the next job market is generated there.
+- The delivery timer starts once the cargo is on board. Perishables pay a bigger time bonus, and fragile or hazardous cargo loses more pay per % of damage.
+- A job fails if the condition reaches 0%, or if you abandon it from the pause menu. Failing costs a cancellation fee.
+
+Data: `src/data/cargo.js` (13 cargo types), `src/data/economy.js` (all pay
+values), facilities in `src/game/mapData.js`, and job generation and reward
+maths in `src/game/jobs.js`.
 
 ## Project layout
 

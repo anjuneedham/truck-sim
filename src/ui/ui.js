@@ -3,7 +3,7 @@
 
 const $ = (id) => document.getElementById(id);
 
-const SCREENS = ['screen-menu', 'screen-garage', 'screen-settings', 'screen-offer', 'screen-pause', 'screen-complete', 'screen-failed'];
+const SCREENS = ['screen-menu', 'screen-garage', 'screen-settings', 'screen-jobs', 'screen-pause', 'screen-complete', 'screen-failed'];
 
 export function formatMoney(n) {
   return '$' + Math.round(n).toLocaleString('en-US');
@@ -42,8 +42,10 @@ export class UI {
     bind('btn-garage-back', () => handlers.garageBack());
     bind('btn-fullscreen', () => handlers.fullscreen());
     bind('btn-settings-back', () => this.closeSettings());
-    bind('btn-offer-back', () => handlers.toMenu());
-    bind('btn-offer-accept', () => handlers.acceptJob());
+    bind('btn-jobs-back', () => handlers.toMenu());
+    bind('btn-job-accept', () => handlers.acceptJob(this.selectedJob));
+    bind('btn-abandon', () => handlers.abandonJob());
+    this.selectedJob = -1;
     bind('btn-resume', () => handlers.resume());
     bind('btn-restart', () => handlers.restart());
     bind('btn-pause-settings', () => this.openSettings('screen-pause'));
@@ -111,6 +113,11 @@ export class UI {
 
   showScreen(id) {
     for (const s of SCREENS) $(s).classList.toggle('hidden', s !== id);
+    // Menus/results replace any in-game toast so it can't cover them.
+    if (id) {
+      clearTimeout(this.toastTimer);
+      $('toast').classList.add('hidden');
+    }
   }
 
   setDrivingUI(visible) {
@@ -157,17 +164,54 @@ export class UI {
     $('menu-deliveries').textContent = save.deliveriesCompleted;
   }
 
-  showOffer(mission, fromName) {
-    $('offer-from').textContent = fromName;
-    $('offer-to').textContent = mission.job.destination;
-    $('offer-cargo').textContent = `${mission.job.cargo} (${((mission.job.cargoMass || 0) / 1000).toFixed(1)} t)`;
-    $('offer-trailer').textContent = mission.trailer ? `${mission.trailer.type.name} · ${mission.trailer.type.operator}` : 'Carried in your box truck';
-    $('offer-distance').textContent = mission.routeKm.toFixed(2) + ' km';
-    $('offer-pay').textContent = formatMoney(mission.basePay);
-    this.showScreen('screen-offer');
+  /**
+   * Job market list.
+   * @param {object} v { location, jobs: [{ cargoName, trailerName, trailerColor, from, to, km, mass, pay, difficulty, compatible, reason }] }
+   */
+  showJobMarket(v) {
+    $('jobs-location').textContent = `At ${v.location}`;
+    const list = $('job-list');
+    list.innerHTML = '';
+    this.selectedJob = -1;
+    $('btn-job-accept').disabled = true;
+    v.jobs.forEach((j, i) => {
+      const card = document.createElement('button');
+      card.className = 'job-card' + (j.compatible ? '' : ' locked');
+      card.setAttribute('role', 'option');
+      card.dataset.index = i;
+      card.innerHTML = `
+        <div class="job-top">
+          <span class="trailer-dot" style="background:${j.trailerColor}"></span>
+          <strong></strong>
+          <span class="stars" aria-label="Difficulty ${j.difficulty} of 3">${'★'.repeat(j.difficulty)}${'☆'.repeat(3 - j.difficulty)}</span>
+        </div>
+        <div class="job-route"></div>
+        <div class="job-bottom"><span class="job-km"></span><span class="job-mass"></span><span class="money"></span></div>
+        ${j.compatible ? '' : '<div class="job-warn"></div>'}`;
+      card.querySelector('strong').textContent = j.cargoName;
+      card.querySelector('.job-route').textContent = `${j.from} → ${j.to} · ${j.trailerName}`;
+      card.querySelector('.job-km').textContent = `${j.km.toFixed(2)} km`;
+      card.querySelector('.job-mass').textContent = `${(j.mass / 1000).toFixed(1)} t`;
+      card.querySelector('.money').textContent = formatMoney(j.pay);
+      if (!j.compatible) card.querySelector('.job-warn').textContent = j.reason;
+      card.addEventListener('click', () => {
+        this.handlers.click();
+        if (!j.compatible) {
+          this.toast(j.reason);
+          return;
+        }
+        this.selectedJob = j.index ?? i;
+        list.querySelectorAll('.job-card').forEach((c) => c.classList.toggle('selected', c === card));
+        card.setAttribute('aria-selected', 'true');
+        $('btn-job-accept').disabled = false;
+      });
+      list.appendChild(card);
+    });
+    this.showScreen('screen-jobs');
   }
 
-  showComplete(result, balance) {
+  showComplete(result, balance, route = '') {
+    $('res-route').textContent = route;
     $('res-base').textContent = formatMoney(result.basePay);
     $('res-bonus').textContent = '+' + formatMoney(result.timeBonus);
     $('res-damage').textContent = `-${formatMoney(result.damagePenalty)} (${Math.round(result.damagePct)}%)`;

@@ -102,21 +102,16 @@
     </section>
 
     <!-- ============ JOB OFFER ============ -->
-    <section id="screen-offer" class="screen overlay hidden">
-      <div class="panel">
-        <h2>Delivery Job</h2>
-        <dl class="job">
-          <dt>From</dt><dd id="offer-from"></dd>
-          <dt>To</dt><dd id="offer-to"></dd>
-          <dt>Cargo</dt><dd id="offer-cargo"></dd>
-          <dt>Trailer</dt><dd id="offer-trailer"></dd>
-          <dt>Distance</dt><dd id="offer-distance"></dd>
-          <dt>Pay</dt><dd id="offer-pay" class="money"></dd>
-        </dl>
-        <p class="hint">Drive to the green marker and stop inside it to unload. Collisions reduce your pay.</p>
+    <section id="screen-jobs" class="screen overlay hidden">
+      <div class="panel jobs-panel">
+        <div class="jobs-head">
+          <h2>Job Market</h2>
+          <span class="jobs-location" id="jobs-location"></span>
+        </div>
+        <div class="job-list" id="job-list" role="listbox" aria-label="Available jobs"></div>
         <div class="btn-row">
-          <button class="btn" id="btn-offer-back">Menu</button>
-          <button class="btn btn-primary" id="btn-offer-accept">Accept &amp; Drive</button>
+          <button class="btn" id="btn-jobs-back">Menu</button>
+          <button class="btn btn-primary" id="btn-job-accept" disabled>Accept job</button>
         </div>
       </div>
     </section>
@@ -187,6 +182,7 @@
         <h2>Paused</h2>
         <button class="btn btn-primary" id="btn-resume">Resume</button>
         <button class="btn" id="btn-restart">Restart delivery</button>
+        <button class="btn btn-danger" id="btn-abandon">Abandon job</button>
         <button class="btn" id="btn-pause-settings">Settings</button>
         <button class="btn btn-ghost" id="btn-pause-menu">Main menu</button>
       </div>
@@ -196,6 +192,7 @@
     <section id="screen-complete" class="screen overlay hidden">
       <div class="panel">
         <h2 class="success">Delivery Complete!</h2>
+        <p class="hint" id="res-route"></p>
         <dl class="job">
           <dt>Delivery pay</dt><dd id="res-base"></dd>
           <dt>Time bonus</dt><dd id="res-bonus"></dd>
@@ -206,7 +203,7 @@
         </dl>
         <div class="btn-row">
           <button class="btn" id="btn-complete-menu">Menu</button>
-          <button class="btn btn-primary" id="btn-next">Next delivery</button>
+          <button class="btn btn-primary" id="btn-next">Job market</button>
         </div>
       </div>
     </section>

@@ -84,12 +84,34 @@ try {
     window.__game.setSetting('quality', 'medium');
   });
 
-  // ---- Play -> job offer -> drive
+  // ---- Play -> job market -> drive
   await page.click('#btn-play');
-  check('Play opens job offer', await visible('#screen-offer'));
-  await shot('03-offer');
-  await page.click('#btn-offer-accept');
+  check('Play opens the job market', (await visible('#screen-jobs')) && (await page.locator('.job-card').count()) === 6);
+  check('Job cards show cargo, route, distance, reward, difficulty', (await page.locator('.job-card .stars').count()) === 6 && (await page.locator('.job-card .money').first().textContent()).startsWith('$'));
+  await shot('03-job-market');
+  check('Accept disabled until a job is selected', await page.isDisabled('#btn-job-accept'));
+  const lockedCount = await page.locator('.job-card.locked').count();
+  if (lockedCount) {
+    await page.locator('.job-card.locked').first().click();
+    check('Box truck cannot take trailer-only jobs', await page.isDisabled('#btn-job-accept'));
+  }
+  const pickedCard = page.locator('.job-card:not(.locked)').last();
+  const pickedCargo = await pickedCard.locator('strong').textContent();
+  const pickedRoute = await pickedCard.locator('.job-route').textContent();
+  await pickedCard.click();
+  check('Selecting a job enables Accept', !(await page.isDisabled('#btn-job-accept')));
+  await page.click('#btn-job-accept');
   check('Accept starts driving', (await g('game.state')) === 'driving' && (await visible('#hud')) && (await visible('#controls')));
+  const acc = await g('({c: game.mission.cargo.name, f: game.mission.from.name, t: game.mission.to.name})');
+  check('Accepted job matches the selected card', acc.c === pickedCargo && pickedRoute.startsWith(`${acc.f} → ${acc.t}`), `${acc.c} ${acc.f}→${acc.t}`);
+  // Use a known job from here on (depot -> warehouse, loaded at the depot).
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.parkAtLocation();
+    g.startJob(g.createJob('canned', 'depot', 'warehouse'));
+  });
+  await wait(200);
+  check('Rigid truck job starts with a loading stage', (await g('game.mission.stage')) === 'load' && (await page.textContent('#hud-objective')).startsWith('Load'));
   const spawn = await g('({x: game.phys.x, z: game.phys.z, h: game.phys.heading})');
   check('Truck spawns at depot', Math.abs(spawn.x - -110) < 0.1 && Math.abs(spawn.z - 152) < 0.1);
 
@@ -329,12 +351,17 @@ try {
   await page.click('#btn-resume');
   check('Resume works', (await g('game.state')) === 'driving');
 
-  // ---- Destination: teleport next to the zone and drive in, then stop
+  // ---- Pickup: stop in the loading zone, then deliver to the drop pad.
   const job = await g('game.mission.job');
+  const loadZone = await g('game.mission.from.loadZone');
+  const dropZone = await g('game.mission.to.dropZone');
   const money0 = await g('game.save.data.money');
   const deliveries0 = await g('game.save.data.deliveriesCompleted');
+  await g(`(game.resetTruck(${loadZone.x}, ${loadZone.z}, 0), true)`);
+  await page.waitForFunction(() => window.__game.mission.stage === 'deliver', null, { timeout: 6000 });
+  check('Stopping in the loading zone loads the cargo', (await g('game.mission.loaded')) && (await page.textContent('#hud-objective')).startsWith('Deliver'));
   const dist0 = await g('game.mission.distanceTo(game.phys)');
-  await g(`(game.resetTruck(${job.zone.x}, ${job.zone.z}, 0), true)`);
+  await g(`(game.resetTruck(${dropZone.x}, ${dropZone.z}, 0), true)`);
   await wait(300);
   const hudDistText = await page.textContent('#hud-distance');
   check('HUD distance updates / in-zone prompt', hudDistText === 'Stop inside the marker', `before=${dist0.toFixed(0)}m`);
@@ -349,24 +376,41 @@ try {
   check('Money + deliveries saved', stored.money === money1 && stored.deliveriesCompleted === deliveries0 + 1);
   await shot('07-complete');
 
-  // ---- Next delivery (restart loop)
+  check('Career continues from the drop-off location', (await g('game.save.data.location')) === 'warehouse');
+  check('Delivery stats recorded', (await g('game.save.data.stats.distanceKm')) > 0);
+
+  // ---- Next job from the new location (restart loop)
   await page.click('#btn-next');
-  check('Next delivery offers a new job', (await visible('#screen-offer')) && (await g('game.mission.job.id')) !== job.id);
-  await page.click('#btn-offer-accept');
+  check('Job market opens at the new location', (await visible('#screen-jobs')) && (await page.textContent('#jobs-location')) === 'At Eastgate Warehouse');
+  const newJobs = await g('game.getJobMarket().map((j) => j.id)');
+  check('Fresh jobs generated after delivery', !newJobs.includes(job.id));
+  await page.locator('.job-card:not(.locked)').first().click();
+  await page.click('#btn-job-accept');
+  const startPose = await g('({...game.jobStart})');
+  check('Truck starts the next job where it delivered', Math.hypot(startPose.x - dropZone.x, startPose.z - dropZone.z) < 1);
   await holdKeys(['ArrowUp'], 800);
   await page.keyboard.press('Escape');
   await wait(100);
   await page.click('#btn-restart');
   await wait(100);
   const rs = await g('({s: game.state, x: game.phys.x, z: game.phys.z, v: game.phys.speed})');
-  check('Restart delivery resets truck', rs.s === 'driving' && Math.abs(rs.x - -110) < 0.1 && Math.abs(rs.z - 152) < 0.1 && rs.v === 0);
+  check('Restart delivery resets truck to the job start', rs.s === 'driving' && Math.hypot(rs.x - startPose.x, rs.z - startPose.z) < 0.1 && rs.v === 0);
 
-  // ---- Failure path
+  // ---- Failure path (cargo destroyed) + fee
+  const moneyBeforeFail = await g('game.save.data.money');
   await g('(game.phys.condition = 0, true)');
   await wait(200);
   check('Mission fails when condition reaches 0', (await g('game.state')) === 'failed' && (await visible('#screen-failed')));
+  check('Failed delivery charges a fee and is counted', (await g('game.save.data.money')) < moneyBeforeFail && (await g('game.save.data.stats.failed')) === 1);
   await page.click('#btn-retry');
   check('Retry after failure', (await g('game.state')) === 'driving' && (await g('game.phys.condition')) === 100);
+  // Abandon from the pause menu.
+  await page.keyboard.press('Escape');
+  await wait(100);
+  await page.click('#btn-abandon');
+  check('Abandoning a job fails it', (await visible('#screen-failed')) && (await page.textContent('#fail-reason')).includes('abandoned'));
+  await page.click('#btn-retry');
+  const moneyNow = await g('game.save.data.money');
 
   // ---- Back to menu, reload, progress loaded
   await page.keyboard.press('Escape');
@@ -375,7 +419,9 @@ try {
   await page.reload();
   await page.waitForFunction(() => window.__game && window.__game.fps > 0);
   const menuMoney = await page.textContent('#menu-money');
-  check('Progress loads after reload', menuMoney === '$' + money1.toLocaleString('en-US'), menuMoney);
+  check('Progress loads after reload', menuMoney === '$' + moneyNow.toLocaleString('en-US'), menuMoney);
+  const home = await g('({loc: game.save.data.location, x: game.phys.x, z: game.phys.z})');
+  check('Location persists: truck parked at the warehouse after reload', home.loc === 'warehouse' && Math.hypot(home.x - 135, home.z - -150) < 0.5);
 
   // ---- Phase 2: garage / truck selection
   await page.click('#btn-garage');
@@ -407,7 +453,11 @@ try {
   check('Leaving garage restores the selected truck', (await g('game.model.entry.id')) === 'kestrel-c400' && (await visible('#screen-menu')));
 
   // ---- Phase 3: trailers
-  // Render every trailer type behind the tractor for visual review.
+  // Render every trailer type behind the tractor for visual review (at the depot).
+  await page.evaluate(() => {
+    window.__game.save.data.location = 'depot';
+    window.__game.parkAtLocation();
+  });
   for (const type of ['box', 'reefer', 'flatbed', 'tanker', 'container']) {
     await page.evaluate((t) => window.__game.spawnTrailer({ trailer: t, cargoMass: 0 }), type);
     await wait(300);
@@ -428,12 +478,16 @@ try {
   check('All 5 trailer types build without errors', errors.length === 0, errors.slice(0, 2).join(' | '));
   await page.evaluate(() => window.__game.removeTrailer());
 
-  await page.evaluate(() => {
-    window.__game.save.data.nextJobIndex = 0;
-  });
   await page.click('#btn-play');
-  check('Job offer shows trailer for a tractor', (await page.textContent('#offer-trailer')).includes('Box trailer'));
-  await page.click('#btn-offer-accept');
+  check('Tractor sees every job as available', (await page.locator('.job-card.locked').count()) === 0);
+  check('Job cards name the trailer type for a tractor', /trailer|Flatbed|Tanker|chassis/.test(await page.locator('.job-route').first().textContent()));
+  // Known job from the depot so the trailer is parked right behind the truck.
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.save.data.location = 'depot';
+    g.parkAtLocation();
+    g.startJob(g.createJob('canned', 'depot', 'warehouse'));
+  });
   const tr0 = await g('({attached: game.trailer.attached, stage: game.mission.stage})');
   check('Trailer spawns parked behind the tractor', tr0.attached === false && tr0.stage === 'couple');
   await wait(200);

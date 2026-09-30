@@ -43,51 +43,85 @@ export const INTERSECTIONS = [
   [-RING, 0],
 ];
 
-/** Paved lots (x0, z0, x1, z1). */
-export const LOTS = {
-  depot: [-150, 130, -70, 192],
-  warehouse: [70, -192, 150, -118],
-  site: [8, 60, 76, 140],
-  market: [-150, -70, -60, -8],
-};
-
-export const SPAWN = { x: -110, z: 152, heading: 0, name: 'Northside Depot' };
-
 /**
- * Delivery jobs. The zone is where the truck must stop to unload.
- * `building` is the collidable structure behind the zone.
+ * Facilities: every lot is a place with a gameplay purpose.
+ *   lot         paved area (x0, z0, x1, z1)
+ *   parking     where a truck is placed when a session starts here
+ *   trailerSpot kingpin position/heading where pickup trailers wait
+ *   loadZone    where a rigid truck stops to be loaded
+ *   dropZone    where cargo (the trailer, or a rigid truck) is delivered
+ *   building    the facility building (collidable)
+ *   produces / accepts  cargo ids for job generation
+ *   parking difficulty 0..1 (tight lots make jobs harder)
  */
-export const JOBS = [
+export const FACILITIES = [
+  {
+    id: 'depot',
+    name: 'Northside Depot',
+    kind: 'Freight depot',
+    lot: [-150, 130, -70, 192],
+    parking: { x: -110, z: 152, heading: 0 },
+    trailerSpot: { x: -110, z: 144.5, heading: 0 },
+    loadZone: { x: -110, z: 150, w: 12, l: 20 },
+    dropZone: { x: -84, z: 152, w: 14, l: 24 },
+    building: { x: -110, z: 116, w: 70, l: 18, h: 10, color: 0x6f8f72 },
+    produces: ['canned', 'furniture', 'electronics', 'consumer', 'autoparts'],
+    accepts: ['produce', 'frozen', 'steel', 'lumber', 'fuel', 'machinery', 'cookingoil'],
+    difficulty: 0.1,
+  },
   {
     id: 'warehouse',
-    destination: 'Eastgate Warehouse',
-    cargo: 'Canned goods',
-    trailer: 'box',
-    cargoMass: 4000,
-    zone: { x: 110, z: -142, w: 14, l: 22 },
+    name: 'Eastgate Warehouse',
+    kind: 'Warehouse',
+    lot: [70, -192, 150, -118],
+    parking: { x: 135, z: -150, heading: Math.PI },
+    trailerSpot: { x: 84, z: -163, heading: 0 },
+    loadZone: { x: 86, z: -160, w: 12, l: 22 },
+    dropZone: { x: 110, z: -142, w: 14, l: 22 },
     building: { x: 110, z: -108, w: 60, l: 20, h: 12, color: 0x8a9bb0 },
+    produces: ['canned', 'electronics', 'consumer', 'furniture', 'dairy'],
+    accepts: ['canned', 'autoparts', 'consumer', 'electronics', 'frozen', 'cookingoil'],
+    difficulty: 0.15,
   },
   {
     id: 'site',
-    destination: 'Riverside Construction Site',
-    cargo: 'Steel beams',
-    trailer: 'flatbed',
-    cargoMass: 6000,
-    zone: { x: 42, z: 100, w: 22, l: 14 },
+    name: 'Riverside Construction',
+    kind: 'Construction site',
+    lot: [8, 60, 76, 140],
+    parking: { x: 30, z: 72, heading: -Math.PI / 2 },
+    trailerSpot: { x: 24, z: 128, heading: Math.PI / 2 },
+    loadZone: { x: 22, z: 126, w: 20, l: 12 },
+    dropZone: { x: 42, z: 100, w: 22, l: 14 },
     building: { x: 64, z: 100, w: 14, l: 50, h: 9, color: 0xc9a14a },
+    produces: ['lumber', 'machinery'],
+    accepts: ['steel', 'lumber', 'machinery', 'fuel'],
+    difficulty: 0.35,
   },
   {
     id: 'market',
-    destination: 'Westend Market',
-    cargo: 'Fresh produce',
-    trailer: 'reefer',
-    cargoMass: 3500,
-    zone: { x: -105, z: -38, w: 16, l: 20 },
+    name: 'Westend Market',
+    kind: 'Market',
+    lot: [-150, -70, -60, -8],
+    parking: { x: -80, z: -20, heading: 0 },
+    trailerSpot: { x: -135, z: -26, heading: 0 },
+    loadZone: { x: -135, z: -28, w: 12, l: 20 },
+    dropZone: { x: -105, z: -38, w: 16, l: 20 },
     building: { x: -105, z: -60, w: 70, l: 16, h: 8, color: 0xb86b5a },
+    produces: ['produce', 'frozen', 'dairy', 'cookingoil'],
+    accepts: ['produce', 'frozen', 'canned', 'consumer', 'dairy', 'fuel', 'furniture'],
+    difficulty: 0.25,
   },
 ];
 
-export const DEPOT_BUILDING = { x: -110, z: 116, w: 70, l: 18, h: 10, color: 0x6f8f72 };
+export function getFacility(id) {
+  return FACILITIES.find((f) => f.id === id) || FACILITIES[0];
+}
+
+/** Paved lots keyed by facility id (used by world building + surface checks). */
+export const LOTS = Object.fromEntries(FACILITIES.map((f) => [f.id, f.lot]));
+
+/** Default start: the depot's parking spot. */
+export const SPAWN = { ...FACILITIES[0].parking, name: FACILITIES[0].name };
 
 /** Deterministic pseudo-random generator so the map is the same every run. */
 export function makeRng(seed = 1234) {

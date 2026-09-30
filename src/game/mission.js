@@ -1,55 +1,65 @@
-// Single delivery mission: drive from the depot to a destination zone and stop.
+// One delivery job from pickup facility to drop-off facility.
 //
-// States:  offer -> active -> complete
-//                        \-> failed (only if the truck's condition hits 0%)
+// States:  active -> complete
+//                 \-> failed (cargo destroyed, or job abandoned)
 //
-// With a tractor unit the cargo is in a trailer: the objective is first to
-// couple the parked trailer, then to park the *trailer* inside the zone.
-// Rigid trucks carry the cargo themselves.
+// Stages while active:
+//   rigid truck:  'load'   drive to the pickup loading zone and stop
+//   tractor:      'couple' reverse under the trailer parked at the pickup
+//   both:         'deliver' get the cargo (trailer / rigid truck) onto the drop pad
 //
-// Also owns the destination marker visuals (zone pad + beacon).
+// The delivery timer (for the time bonus) starts once the cargo is on board.
+// Also owns the pickup + drop-off marker visuals.
 
 import * as THREE from 'three';
 import { MISSION } from '../config.js';
-import { SPAWN } from './mapData.js';
+import { getFacility } from './mapData.js';
+import { getCargo } from '../data/cargo.js';
+import { computeReward, jobPay, parTimeFor } from './jobs.js';
+
+const DROP_COLOR = 0x55ff99;
+const PICKUP_COLOR = 0xffb62e;
 
 export class Mission {
-  /** @param {import('./trailerPhysics.js').TrailerPhysics|null} trailer */
+  /**
+   * @param {THREE.Scene} scene
+   * @param {object} job from jobs.js
+   * @param {import('./trailerPhysics.js').TrailerPhysics|null} trailer
+   */
   constructor(scene, job, trailer = null) {
+    this.scene = scene;
     this.job = job;
     this.trailer = trailer;
-    this.state = 'offer';
-    this.elapsed = 0;
+    this.cargo = getCargo(job.cargo);
+    this.from = getFacility(job.from);
+    this.to = getFacility(job.to);
+    this.state = 'active';
+    this.loaded = false; // rigid trucks: cargo loaded at the pickup
+    this.elapsed = 0; // delivery time (starts when the cargo is on board)
     this.stoppedTime = 0;
+    this.loadTime = 0;
     this.result = null;
 
-    // Route estimate: straight line * 1.35 approximates following the road grid.
-    const straight = Math.hypot(job.zone.x - SPAWN.x, job.zone.z - SPAWN.z);
-    this.routeKm = (straight * 1.35) / 1000;
-    const trailerBonus = trailer ? MISSION.trailerPayMultiplier : 1;
-    this.basePay = Math.round(((MISSION.basePay + this.routeKm * MISSION.payPerKm) * trailerBonus) / 10) * 10;
-    // Par time from an average route speed (loaded rigs are slower).
-    const parSpeed = trailer ? MISSION.parSpeedTrailerKmh : MISSION.parSpeedKmh;
-    this.parTime = (this.routeKm / parSpeed) * 3600;
+    this.routeKm = job.km;
+    this.basePay = jobPay(job, !!trailer);
+    this.parTime = parTimeFor(job, !!trailer);
 
-    this.marker = this.buildMarker(scene, job.zone);
+    this.dropMarker = this.buildZoneMarker(this.to.dropZone, DROP_COLOR, 60);
+    this.pickupMarker = trailer ? null : this.buildZoneMarker(this.from.loadZone, PICKUP_COLOR, 30);
+    this.trailerBeacon = trailer ? this.buildBeacon(PICKUP_COLOR, 30) : null;
   }
 
-  buildMarker(scene, zone) {
+  buildZoneMarker(zone, color, beaconHeight) {
     const group = new THREE.Group();
     group.position.set(zone.x, 0, zone.z);
-
     const pad = new THREE.Mesh(
       new THREE.PlaneGeometry(zone.w, zone.l),
-      new THREE.MeshBasicMaterial({ color: 0x33dd77, transparent: true, opacity: 0.28, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, depthWrite: false })
     );
     pad.rotation.x = -Math.PI / 2;
     pad.position.y = 0.08;
     group.add(pad);
-    this.padMat = pad.material;
-
-    // Outline
-    const outlineMat = new THREE.MeshBasicMaterial({ color: 0x55ff99 });
+    const outlineMat = new THREE.MeshBasicMaterial({ color });
     const t = 0.35;
     for (const [w, l, x, z] of [
       [zone.w, t, 0, zone.l / 2],
@@ -62,45 +72,67 @@ export class Mission {
       m.position.set(x, 0.09, z);
       group.add(m);
     }
-
-    // Tall beacon visible from across the map.
-    const beacon = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.2, 1.2, 60, 10, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0x55ff99, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })
-    );
-    beacon.position.y = 30;
+    const beacon = this.makeBeaconMesh(color, beaconHeight);
     group.add(beacon);
-    this.beacon = beacon;
-
-    scene.add(group);
+    group.userData.pad = pad;
+    group.userData.beacon = beacon;
+    this.scene.add(group);
     return group;
   }
 
-  dispose(scene) {
-    scene.remove(this.marker);
-    this.marker.traverse((o) => {
-      if (o.isMesh) {
-        o.geometry.dispose();
-        o.material.dispose();
-      }
-    });
+  makeBeaconMesh(color, height) {
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.2, 1.2, height, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })
+    );
+    beacon.position.y = height / 2;
+    return beacon;
   }
 
-  start() {
-    this.state = 'active';
-    this.elapsed = 0;
-    this.stoppedTime = 0;
+  buildBeacon(color, height) {
+    const g = new THREE.Group();
+    g.add(this.makeBeaconMesh(color, height));
+    this.scene.add(g);
+    return g;
   }
 
-  /** Current step: 'couple' (go get the trailer) or 'deliver'. */
+  dispose() {
+    for (const m of [this.dropMarker, this.pickupMarker, this.trailerBeacon]) {
+      if (!m) continue;
+      this.scene.remove(m);
+      m.traverse((o) => {
+        if (o.isMesh) {
+          o.geometry.dispose();
+          o.material.dispose();
+        }
+      });
+    }
+  }
+
+  /** Current step: 'load' | 'couple' | 'deliver'. */
   get stage() {
-    return this.trailer && !this.trailer.attached && !this.cargoInZone(null) ? 'couple' : 'deliver';
+    if (this.trailer) return !this.trailer.attached && !this.cargoInZone(null) ? 'couple' : 'deliver';
+    return this.loaded ? 'deliver' : 'load';
+  }
+
+  /** Human-readable objective for the HUD. */
+  get objective() {
+    switch (this.stage) {
+      case 'load':
+        return `Load ${this.cargo.name.toLowerCase()} at ${this.from.name}`;
+      case 'couple':
+        return `Couple the ${this.trailer.type.name.toLowerCase()} at ${this.from.name}`;
+      default:
+        return `Deliver ${this.cargo.name.toLowerCase()} to ${this.to.name}`;
+    }
   }
 
   /** Where the HUD arrow / distance should point right now. */
   target() {
-    if (this.stage === 'couple') return { x: this.trailer.kx, z: this.trailer.kz };
-    return { x: this.job.zone.x, z: this.job.zone.z };
+    const st = this.stage;
+    if (st === 'couple') return { x: this.trailer.kx, z: this.trailer.kz };
+    if (st === 'load') return { x: this.from.loadZone.x, z: this.from.loadZone.z };
+    return { x: this.to.dropZone.x, z: this.to.dropZone.z };
   }
 
   distanceTo(phys) {
@@ -115,43 +147,70 @@ export class Mission {
     return Math.atan2(Math.sin(d), Math.cos(d));
   }
 
-  pointInZone(x, z) {
-    const zone = this.job.zone;
-    const tol = 2.5;
+  static pointInZone(zone, x, z, tol = 2.5) {
     return Math.abs(x - zone.x) < zone.w / 2 + tol && Math.abs(z - zone.z) < zone.l / 2 + tol;
   }
 
-  /** Is the cargo (trailer body, or the rigid truck itself) on the pad? */
+  /** Is the cargo (trailer body, or the loaded rigid truck) on the drop pad? */
   cargoInZone(phys) {
-    if (this.trailer) return this.pointInZone(this.trailer.cx, this.trailer.cz);
-    return phys ? this.pointInZone(phys.x, phys.z) : false;
+    const zone = this.to.dropZone;
+    if (this.trailer) return Mission.pointInZone(zone, this.trailer.cx, this.trailer.cz);
+    return !!phys && this.loaded && Mission.pointInZone(zone, phys.x, phys.z);
   }
 
-  /** Kept for the HUD: true when the cargo is on the pad. */
+  /** For the HUD: is the player on the pad that matters right now? */
   inZone(phys) {
+    if (this.stage === 'load') return Mission.pointInZone(this.from.loadZone, phys.x, phys.z);
     return this.cargoInZone(phys);
   }
 
-  /** Returns 'complete' | 'failed' | null when the state changes this frame. */
+  /**
+   * Advance the mission.
+   * @returns {'complete'|'failed'|'loaded'|null} event this frame
+   */
   update(phys, dt, time) {
-    // Pulse the marker.
-    this.padMat.opacity = 0.22 + Math.sin(time * 4) * 0.08;
-    this.beacon.scale.x = this.beacon.scale.z = 1 + Math.sin(time * 3) * 0.08;
+    for (const m of [this.dropMarker, this.pickupMarker]) {
+      if (!m) continue;
+      m.userData.pad.material.opacity = 0.22 + Math.sin(time * 4) * 0.08;
+      m.userData.beacon.scale.x = m.userData.beacon.scale.z = 1 + Math.sin(time * 3) * 0.08;
+    }
+    if (this.trailerBeacon) {
+      this.trailerBeacon.visible = this.stage === 'couple';
+      this.trailerBeacon.position.set(this.trailer.cx, 0, this.trailer.cz);
+    }
+    if (this.pickupMarker) this.pickupMarker.visible = this.stage === 'load';
 
     if (this.state !== 'active') return null;
-    this.elapsed += dt;
+    if (this.stage === 'deliver') this.elapsed += dt;
 
     if (phys.condition <= 0) {
-      this.state = 'failed';
-      this.result = { reason: 'The cargo was destroyed in collisions.' };
-      return 'failed';
+      return this.fail('The cargo was destroyed in collisions.');
     }
 
-    if (this.cargoInZone(phys) && Math.abs(phys.speed) < MISSION.stopSpeed) {
+    const stopped = Math.abs(phys.speed) < MISSION.stopSpeed;
+    if (this.stage === 'load') {
+      if (stopped && Mission.pointInZone(this.from.loadZone, phys.x, phys.z)) {
+        this.loadTime += dt;
+        if (this.loadTime >= MISSION.loadTime) {
+          this.loaded = true;
+          this.loadTime = 0;
+          return 'loaded';
+        }
+      } else {
+        this.loadTime = 0;
+      }
+      return null;
+    }
+
+    if (this.cargoInZone(phys) && stopped) {
       this.stoppedTime += dt;
       if (this.stoppedTime >= MISSION.stopTime) {
         this.state = 'complete';
-        this.result = this.computeReward(phys);
+        this.result = computeReward(this.job, {
+          withTrailer: !!this.trailer,
+          time: this.elapsed,
+          damagePct: 100 - phys.condition,
+        });
         return 'complete';
       }
     } else {
@@ -160,19 +219,15 @@ export class Mission {
     return null;
   }
 
-  /** Progress 0..1 of the "hold still to unload" timer (for the HUD). */
-  get unloadProgress() {
-    return Math.min(1, this.stoppedTime / MISSION.stopTime);
+  fail(reason) {
+    this.state = 'failed';
+    this.result = { reason };
+    return 'failed';
   }
 
-  computeReward(phys) {
-    const damagePct = 100 - phys.condition;
-    const damagePenalty = Math.round((this.basePay * damagePct) / 100);
-    const timeBonus =
-      this.elapsed < this.parTime
-        ? Math.round((MISSION.timeBonusMax * (this.parTime - this.elapsed)) / this.parTime)
-        : 0;
-    const total = Math.max(0, this.basePay - damagePenalty + timeBonus);
-    return { basePay: this.basePay, damagePenalty, timeBonus, total, time: this.elapsed, damagePct };
+  /** Progress 0..1 of the current "hold still" timer (loading or unloading). */
+  get unloadProgress() {
+    if (this.stage === 'load') return Math.min(1, this.loadTime / MISSION.loadTime);
+    return Math.min(1, this.stoppedTime / MISSION.stopTime);
   }
 }

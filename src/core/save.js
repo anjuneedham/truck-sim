@@ -1,3 +1,5 @@
+import { ECONOMY } from '../data/economy.js';
+
 // Lightweight persistent save using localStorage.
 // Stores money, completed deliveries and settings. All access is wrapped in
 // try/catch so the game still runs in private mode / blocked storage.
@@ -19,10 +21,12 @@ export const DEFAULT_SETTINGS = {
 function defaultSave() {
   return {
     version: 1,
-    money: 0,
+    money: ECONOMY.startingMoney,
     deliveriesCompleted: 0,
-    nextJobIndex: 0,
     selectedTruck: 'mercer-mbox9',
+    location: 'depot', // facility the player is based at (last drop-off)
+    jobMarket: null, // { location, jobs } persisted so the market survives reloads
+    stats: { failed: 0, distanceKm: 0 },
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -43,6 +47,7 @@ export class SaveSystem {
         ...base,
         ...parsed,
         settings: { ...base.settings, ...(parsed.settings || {}) },
+        stats: { ...base.stats, ...(parsed.stats || {}) },
       };
     } catch (err) {
       console.warn('[save] load failed, using defaults', err);
@@ -72,11 +77,6 @@ export class SaveSystem {
   addDeliveryReward(amount) {
     this.data.money += amount;
     this.data.deliveriesCompleted += 1;
-    this.save();
-  }
-
-  advanceJob(jobCount) {
-    this.data.nextJobIndex = (this.data.nextJobIndex + 1) % jobCount;
     this.save();
   }
 

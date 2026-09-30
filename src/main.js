@@ -20,7 +20,11 @@ import { Mission } from './game/mission.js';
 import { TrailerPhysics, JACKKNIFE_WARN, wrapAngle } from './game/trailerPhysics.js';
 import { TrailerModel } from './game/trailerModel.js';
 import { getTrailerType } from './data/trailers.js';
-import { JOBS, SPAWN, LOTS, distanceToRoad, insideRect } from './game/mapData.js';
+import { SPAWN, LOTS, getFacility, distanceToRoad, insideRect } from './game/mapData.js';
+import { generateJobs, jobCompatible, jobPay, makeJob } from './game/jobs.js';
+import { getCargo } from './data/cargo.js';
+import { TRAILER_TYPES } from './data/trailers.js';
+import { ECONOMY } from './data/economy.js';
 import { UI } from './ui/ui.js';
 import { TRUCK_CATALOGUE, getTruck, buildSpec, truckStats, plateFor } from './data/trucks.js';
 import { Minimap } from './ui/minimap.js';
@@ -38,7 +42,7 @@ class Game {
     this.time = 0;
     this.accumulator = 0;
     this.lastImpactSound = 0;
-    this.safeSpot = { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading };
+    this.safeSpot = { ...SPAWN };
     this.safeTimer = 0;
     this.lastCollisionTime = -10;
     this.brakeHoldTime = 0;
@@ -61,11 +65,12 @@ class Game {
         this.audio.unlock();
         this.audio.playClick();
       },
-      play: () => this.openJobOffer(),
-      acceptJob: () => this.startDriving(),
+      play: () => this.openJobMarket(),
+      acceptJob: (i) => this.acceptJob(i),
+      abandonJob: () => this.abandonJob(),
       resume: () => this.resume(),
       restart: () => this.restartDelivery(),
-      nextJob: () => this.openJobOffer(),
+      nextJob: () => this.openJobMarket(),
       toMenu: () => this.toMenu(),
       fullscreen: () => this.enterFullscreen(),
       openGarage: () => this.openGarage(),
@@ -189,7 +194,8 @@ class Game {
     this.model.setShadowMode(this.renderer.shadowMap.enabled);
     this.scene.add(this.model.root);
     this.phys.setSpec(buildSpec(entry));
-    this.resetTruck(SPAWN.x, SPAWN.z, SPAWN.heading);
+    const p = getFacility(this.save.data.location).parking;
+    this.resetTruck(p.x, p.z, p.heading);
   }
 
   openGarage() {
@@ -245,17 +251,18 @@ class Game {
   }
 
   // ---------------------------------------------------------------- trailers
-  /** Create the job's trailer parked behind the spawn point (tractor units only). */
+  /**
+   * Create a job's trailer parked at its pickup facility (tractor units only).
+   * `job` needs { from, cargo, mass } or a debug { trailer, cargoMass }.
+   */
   spawnTrailer(job) {
     this.removeTrailer();
     if (this.truckEntry.body !== 'tractor') return null;
-    const type = getTrailerType(job.trailer);
-    const t = new TrailerPhysics(type, job.cargoMass || 0);
-    // Kingpin a few metres behind the fifth wheel so the player reverses under it.
-    const h = SPAWN.heading;
-    const hx = this.phys.hitchX - Math.sin(h) * MISSION.trailerSpawnGap;
-    const hz = this.phys.hitchZ - Math.cos(h) * MISSION.trailerSpawnGap;
-    t.place(hx, hz, h);
+    const typeId = job.trailer || getCargo(job.cargo).trailer;
+    const type = getTrailerType(typeId);
+    const t = new TrailerPhysics(type, job.mass ?? job.cargoMass ?? 0);
+    const spot = getFacility(job.from || 'depot').trailerSpot;
+    t.place(spot.x, spot.z, spot.heading);
     this.world.collision.addDynamic(t.parkedBox);
     this.trailer = t;
     this.trailerModel = new TrailerModel(type);
@@ -317,6 +324,17 @@ class Game {
     this.removeTrailer();
   }
 
+  /** Where the player is based (last delivery destination). */
+  get location() {
+    return getFacility(this.save.data.location);
+  }
+
+  /** Park the truck at the current facility's parking spot. */
+  parkAtLocation() {
+    const p = this.location.parking;
+    this.resetTruck(p.x, p.z, p.heading);
+  }
+
   toMenu() {
     this.state = 'menu';
     this.setTruck(getTruck(this.save.data.selectedTruck));
@@ -324,37 +342,91 @@ class Game {
     this.input.enabled = false;
     this.input.releaseAll();
     this.audio.setEngineRunning(false);
-    this.resetTruck(SPAWN.x, SPAWN.z, SPAWN.heading);
+    this.parkAtLocation();
     this.phys.condition = 100;
     this.ui.setDrivingUI(false);
     this.ui.updateMenuStats(this.save.data);
     this.ui.showScreen('screen-menu');
   }
 
-  openJobOffer() {
+  // ---------------------------------------------------------------- jobs
+  /** Current job market (regenerated after each delivery or when moving base). */
+  getJobMarket() {
+    const d = this.save.data;
+    if (!d.jobMarket || d.jobMarket.location !== d.location || !d.jobMarket.jobs?.length) {
+      d.jobMarket = { location: d.location, jobs: generateJobs(d.location, this.truckEntry) };
+      this.save.save();
+    }
+    return d.jobMarket.jobs;
+  }
+
+  /** Card data for the job market UI. */
+  jobView(job) {
+    const cargo = getCargo(job.cargo);
+    const tractor = this.truckEntry.body === 'tractor';
+    const compatible = jobCompatible(job, this.truckEntry);
+    const trailer = TRAILER_TYPES[cargo.trailer];
+    return {
+      cargoName: cargo.name,
+      trailerName: tractor || !compatible ? trailer.name : 'Box truck',
+      trailerColor: '#' + trailer.accent.toString(16).padStart(6, '0'),
+      from: getFacility(job.from).name,
+      to: getFacility(job.to).name,
+      km: job.km,
+      mass: job.mass,
+      difficulty: job.difficulty,
+      pay: jobPay(job, tractor),
+      compatible,
+      reason: cargo.trailer !== 'box' ? 'Needs a tractor unit' : 'Too heavy for a box truck',
+    };
+  }
+
+  openJobMarket() {
     this.audio.unlock();
+    // Clears the last job; the truck stays where it is (it may have just delivered).
     this.clearMission();
-    const job = JOBS[this.save.data.nextJobIndex % JOBS.length];
-    this.resetTruck(SPAWN.x, SPAWN.z, SPAWN.heading);
-    this.mission = new Mission(this.scene, job, this.spawnTrailer(job));
-    this.phys.condition = 100;
-    this.state = 'offer';
+    this.state = 'jobs';
+    this.input.enabled = false;
     this.ui.setDrivingUI(false);
     this.audio.setEngineRunning(false);
-    this.ui.showOffer(this.mission, SPAWN.name);
+    // Jobs this truck can take first; `index` maps back to the market list.
+    const views = this.getJobMarket()
+      .map((j, index) => ({ ...this.jobView(j), index }))
+      .sort((a, b) => b.compatible - a.compatible);
+    this.ui.showJobMarket({ location: this.location.name, jobs: views });
+  }
+
+  /** Accept job i from the market and start driving from where the truck is. */
+  acceptJob(i) {
+    const job = this.getJobMarket()[i];
+    if (!job || !jobCompatible(job, this.truckEntry)) return false;
+    this.startJob(job);
+    return true;
+  }
+
+  /** Build a specific job (debug/tests, and future scripted jobs). */
+  createJob(cargoId, fromId, toId) {
+    return makeJob(cargoId, fromId, toId);
+  }
+
+  startJob(job) {
+    this.clearMission();
+    this.jobStart = { x: this.phys.x, z: this.phys.z, heading: this.phys.heading };
+    this.phys.condition = 100;
+    this.mission = new Mission(this.scene, job, this.spawnTrailer(job));
+    this.startDriving();
   }
 
   startDriving() {
     this.audio.unlock();
-    this.mission.start();
-    this.safeSpot = { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading };
+    this.safeSpot = { x: this.phys.x, z: this.phys.z, heading: this.phys.heading };
     this.state = 'driving';
     this.input.enabled = true;
     this.input.clearActions();
     this.ui.showScreen(null);
     this.ui.setDrivingUI(true);
     this.audio.setEngineRunning(true);
-    this.ui.toast(`Deliver ${this.mission.job.cargo.toLowerCase()} to ${this.mission.job.destination}`, 2600);
+    this.ui.toast(this.mission.objective, 2600);
   }
 
   pause() {
@@ -375,26 +447,39 @@ class Game {
     this.audio.setEngineRunning(true);
   }
 
+  /** Start the same job again from where it was accepted. */
   restartDelivery() {
-    const job = this.mission ? this.mission.job : JOBS[0];
+    const job = this.mission?.job;
+    if (!job) return this.openJobMarket();
+    const start = this.jobStart || this.location.parking;
     this.clearMission();
-    this.resetTruck(SPAWN.x, SPAWN.z, SPAWN.heading);
-    this.mission = new Mission(this.scene, job, this.spawnTrailer(job));
-    this.phys.condition = 100;
-    this.startDriving();
+    this.resetTruck(start.x, start.z, start.heading);
+    this.startJob(job);
   }
 
   completeDelivery() {
     const r = this.mission.result;
+    const job = this.mission.job;
     this.state = 'complete';
     this.input.enabled = false;
     this.input.releaseAll();
     this.audio.setEngineRunning(false);
     this.audio.playSuccess();
+    const d = this.save.data;
+    d.stats.distanceKm += job.km;
+    d.location = job.to; // the career continues from here
+    d.jobMarket = null; // fresh jobs at the new location
     this.save.addDeliveryReward(r.total);
-    this.save.advanceJob(JOBS.length);
     this.ui.setDrivingUI(false);
-    this.ui.showComplete(r, this.save.data.money);
+    const route = `${getCargo(job.cargo).name}: ${getFacility(job.from).name} → ${getFacility(job.to).name}`;
+    this.ui.showComplete(r, d.money, route);
+  }
+
+  /** Give up on the current job (costs a fee). */
+  abandonJob() {
+    if (!this.mission) return;
+    this.mission.fail('You abandoned the job.');
+    this.failDelivery();
   }
 
   failDelivery() {
@@ -403,8 +488,13 @@ class Game {
     this.input.releaseAll();
     this.audio.setEngineRunning(false);
     this.audio.playFail();
+    const d = this.save.data;
+    const fee = Math.min(d.money, ECONOMY.delivery.abandonFee);
+    d.money -= fee;
+    d.stats.failed += 1;
+    this.save.save();
     this.ui.setDrivingUI(false);
-    this.ui.showFailed(this.mission.result.reason);
+    this.ui.showFailed(`${this.mission.result.reason} Cancellation fee: $${fee}.`);
   }
 
   /** Put the truck back at the last known good spot on the road. */
@@ -555,6 +645,10 @@ class Game {
     if (this.trailerModel) this.trailerModel.update(this.trailer, this.phys.trailer ? this.phys.speed : 0, input.brake > 0 && !!this.phys.trailer, dt);
 
     const event = this.mission.update(this.phys, dt, this.time);
+    if (event === 'loaded') {
+      this.audio.playHitch(true);
+      this.ui.toast(`${this.mission.cargo.name} loaded`);
+    }
     if (event === 'complete') this.completeDelivery();
     else if (event === 'failed') this.failDelivery();
     return input;
@@ -585,7 +679,7 @@ class Game {
         rpm: this.phys.rpm,
         tilt: this.input.steerMode === 'tilt' ? this.input.tiltSteer : undefined,
         condition: this.phys.condition,
-        objective: m.stage === 'couple' ? `Couple the ${this.trailer.type.name.toLowerCase()}` : `Deliver to ${m.job.destination}`,
+        objective: m.objective,
         distance: m.distanceTo(this.phys),
         bearing: m.relativeBearing(this.phys),
         money: this.save.data.money,
@@ -594,7 +688,7 @@ class Game {
       });
       this.minimap.draw(this.phys, m.target(), this.trailer);
       this.updateTrailerHUD();
-    } else if (this.state === 'menu' || this.state === 'offer' || this.state === 'garage') {
+    } else if (this.state === 'menu' || this.state === 'jobs' || this.state === 'garage') {
       // Slow showcase orbit around the parked truck.
       if (this.camera.fov !== this.baseFov) {
         this.camera.fov = this.baseFov;
