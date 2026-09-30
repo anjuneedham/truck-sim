@@ -131,8 +131,12 @@ try {
   const spawn = await g('({x: game.phys.x, z: game.phys.z, h: game.phys.heading})');
   check('Truck spawns at depot', Math.abs(spawn.x - -110) < 0.1 && Math.abs(spawn.z - 152) < 0.1);
 
-  // ---- Accelerate (keyboard)
-  await holdKeys(['ArrowUp'], 2500);
+  // ---- Accelerate (keyboard): hold the throttle until the truck is moving
+  // (simulated time can lag wall-clock time in the slow software renderer).
+  await page.keyboard.down('ArrowUp');
+  await page.waitForFunction(() => window.__game.phys.speed > 3.5, null, { timeout: 15000 }).catch(() => {});
+  await page.keyboard.up('ArrowUp');
+  await frames(2);
   const afterAccel = await g('({x: game.phys.x, z: game.phys.z, v: game.phys.speed, kmh: game.phys.speedKmh})');
   check('Truck accelerates forward', afterAccel.v > 3 && afterAccel.z > spawn.z + 3, `v=${afterAccel.v.toFixed(2)} m/s`);
   const hudSpeed = await page.textContent('#hud-speed');
